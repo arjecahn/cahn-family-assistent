@@ -92,7 +92,7 @@ class SwapResponse(BaseModel):
 
 
 @app.get("/api/suggest/{task_name}")
-async def suggest_for_task(task_name: str, api_key: str = Depends(verify_api_key)):
+async def suggest_for_task(task_name: str):
     """Suggereer wie een taak moet doen."""
     try:
         suggestion = engine.suggest_member_for_task(task_name)
@@ -113,7 +113,7 @@ async def suggest_for_task(task_name: str, api_key: str = Depends(verify_api_key
 
 
 @app.post("/api/complete")
-async def complete_task(request: TaskCompletionRequest, api_key: str = Depends(verify_api_key)):
+async def complete_task(request: TaskCompletionRequest):
     """Registreer dat iemand een taak heeft voltooid."""
     try:
         completion = engine.complete_task(request.member_name, request.task_name)
@@ -127,7 +127,7 @@ async def complete_task(request: TaskCompletionRequest, api_key: str = Depends(v
 
 
 @app.post("/api/absence")
-async def register_absence(request: AbsenceRequest, api_key: str = Depends(verify_api_key)):
+async def register_absence(request: AbsenceRequest):
     """Registreer afwezigheid."""
     try:
         absence = engine.register_absence(
@@ -146,13 +146,13 @@ async def register_absence(request: AbsenceRequest, api_key: str = Depends(verif
 
 
 @app.get("/api/summary")
-async def weekly_summary(api_key: str = Depends(verify_api_key)):
+async def weekly_summary():
     """Geef het weekoverzicht."""
     return engine.get_weekly_summary()
 
 
 @app.post("/api/swap/request")
-async def request_swap(request: SwapRequest, api_key: str = Depends(verify_api_key)):
+async def request_swap(request: SwapRequest):
     """Vraag een ruil aan."""
     try:
         swap = engine.request_swap(
@@ -171,7 +171,7 @@ async def request_swap(request: SwapRequest, api_key: str = Depends(verify_api_k
 
 
 @app.post("/api/swap/respond")
-async def respond_to_swap(request: SwapResponse, api_key: str = Depends(verify_api_key)):
+async def respond_to_swap(request: SwapResponse):
     """Reageer op een ruil verzoek."""
     try:
         engine.respond_to_swap(request.swap_id, request.accept)
@@ -185,7 +185,7 @@ async def respond_to_swap(request: SwapResponse, api_key: str = Depends(verify_a
 
 
 @app.get("/api/swaps/pending/{member_name}")
-async def get_pending_swaps(member_name: str, api_key: str = Depends(verify_api_key)):
+async def get_pending_swaps(member_name: str):
     """Haal openstaande ruil verzoeken op."""
     swaps = engine.get_pending_swaps(member_name)
     return [
