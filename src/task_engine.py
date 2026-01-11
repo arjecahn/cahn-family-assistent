@@ -921,10 +921,15 @@ class TaskEngine:
             schedule = self._build_schedule_from_stored(
                 stored_assignments, all_completions, week_start, day_availability, tasks_lookup
             )
+            # Check voor gemiste taken en herplan ze naar toekomstige dagen
+            schedule = self._reschedule_missed_tasks(
+                schedule, week_number, year, week_start, members, tasks_lookup, day_availability
+            )
         else:
-            # Genereer nieuw rooster en sla op
+            # Genereer nieuw rooster en sla op (met maandelijkse balancering)
             schedule, assignments_to_save = self._generate_new_schedule(
-                members, tasks, all_completions, day_availability, week_start
+                members, tasks, all_completions, day_availability, week_start,
+                month_completions=month_completions
             )
             # Sla op in database
             db.save_schedule_for_week(week_number, year, assignments_to_save)
@@ -964,6 +969,171 @@ class TaskEngine:
             day_availability[day_name] = available
         return day_availability
 
+    def _reschedule_missed_tasks(self, schedule: dict, week_number: int, year: int,
+                                   week_start: date, members: list, tasks_lookup: dict,
+                                   day_availability: dict) -> dict:
+        """Herplan gemiste taken naar toekomstige dagen in de week.
+
+        Als een taak gemist is (dag voorbij, niet gedaan), wordt deze:
+        1. Op de originele dag getoond met ❌ (doorgestreept)
+        2. Herplant naar een toekomstige dag voor dezelfde persoon
+
+        Returns:
+            Updated schedule dict met herplande taken toegevoegd
+        """
+        today = today_local()
+        today_idx = (today - week_start).days
+
+        # Vind alle gemiste taken
+        missed_tasks = []
+        for day_idx in range(7):
+            day_name = DAY_NAMES[day_idx]
+            day_date = week_start + timedelta(days=day_idx)
+            if day_date >= today:
+                continue  # Alleen verleden dagen checken
+
+            for task_info in schedule[day_name]["tasks"]:
+                if task_info.get("missed"):
+                    missed_tasks.append({
+                        "original_day": day_idx,
+                        "task_name": task_info["task_name"],
+                        "assigned_to": task_info["assigned_to"],
+                        "time_of_day": task_info.get("time_of_day", "avond")
+                    })
+
+        if not missed_tasks:
+            return schedule
+
+        # Track welke tijdslots al bezet zijn per dag per persoon
+        member_day_slots = {day_idx: {m.name: set() for m in members} for day_idx in range(7)}
+        for day_idx in range(7):
+            day_name = DAY_NAMES[day_idx]
+            for task_info in schedule[day_name]["tasks"]:
+                assigned = task_info.get("assigned_to")
+                if assigned and not task_info.get("missed"):
+                    time_slot = task_info.get("time_of_day", "avond")
+                    member_day_slots[day_idx][assigned].add(time_slot)
+
+        # Herplan elke gemiste taak
+        for missed in missed_tasks:
+            task_name = missed["task_name"]
+            original_member = missed["assigned_to"]
+            time_slot = missed["time_of_day"]
+            task = tasks_lookup.get(task_name)
+
+            if not task:
+                continue
+
+            # Check of deze taak al herplant is (al een toekomstige ⬜ assignment heeft)
+            already_rescheduled = False
+            for future_day_idx in range(max(0, today_idx), 7):
+                future_day_name = DAY_NAMES[future_day_idx]
+                for future_task in schedule[future_day_name]["tasks"]:
+                    if (future_task["task_name"] == task_name and
+                        future_task.get("assigned_to") == original_member and
+                        not future_task.get("completed") and
+                        not future_task.get("missed") and
+                        future_task.get("rescheduled_from") is not None):
+                        already_rescheduled = True
+                        break
+                if already_rescheduled:
+                    break
+
+            if already_rescheduled:
+                continue
+
+            # Zoek een geschikte dag om te herplannen (vandaag of later)
+            rescheduled = False
+            for target_day_idx in range(max(0, today_idx), 7):
+                target_day_name = DAY_NAMES[target_day_idx]
+                available = day_availability.get(target_day_name, [])
+
+                # Check of originele persoon beschikbaar is en tijdslot vrij heeft
+                member_available = any(m.name == original_member for m in available)
+                slot_free = time_slot not in member_day_slots[target_day_idx].get(original_member, set())
+
+                if member_available and slot_free:
+                    # Herplan naar deze dag
+                    schedule[target_day_name]["tasks"].append({
+                        "task_name": task_name,
+                        "assigned_to": original_member,
+                        "completed": False,
+                        "completed_by": None,
+                        "time_of_day": time_slot,
+                        "extra": False,
+                        "missed": False,
+                        "rescheduled_from": missed["original_day"]  # Track waar het vandaan komt
+                    })
+
+                    # Update tijdslot tracking
+                    member_day_slots[target_day_idx][original_member].add(time_slot)
+
+                    # Sla ook op in database
+                    member = next((m for m in members if m.name == original_member), None)
+                    if member:
+                        try:
+                            db.add_assignment(
+                                week_number=week_number,
+                                year=year,
+                                day_of_week=target_day_idx,
+                                task_id=task.id,
+                                task_name=task_name,
+                                member_id=member.id,
+                                member_name=member.name
+                            )
+                        except Exception:
+                            pass  # Assignment bestaat mogelijk al
+
+                    rescheduled = True
+                    break
+
+            # Als niet herplant kon worden voor originele persoon, probeer andere leden
+            if not rescheduled:
+                for target_day_idx in range(max(0, today_idx), 7):
+                    target_day_name = DAY_NAMES[target_day_idx]
+                    available = day_availability.get(target_day_name, [])
+
+                    for m in available:
+                        if time_slot not in member_day_slots[target_day_idx].get(m.name, set()):
+                            # Herplan naar deze persoon
+                            schedule[target_day_name]["tasks"].append({
+                                "task_name": task_name,
+                                "assigned_to": m.name,
+                                "completed": False,
+                                "completed_by": None,
+                                "time_of_day": time_slot,
+                                "extra": False,
+                                "missed": False,
+                                "rescheduled_from": missed["original_day"]
+                            })
+                            member_day_slots[target_day_idx][m.name].add(time_slot)
+
+                            try:
+                                db.add_assignment(
+                                    week_number=week_number,
+                                    year=year,
+                                    day_of_week=target_day_idx,
+                                    task_id=task.id,
+                                    task_name=task_name,
+                                    member_id=m.id,
+                                    member_name=m.name
+                                )
+                            except Exception:
+                                pass
+
+                            rescheduled = True
+                            break
+
+                    if rescheduled:
+                        break
+
+        # Sorteer taken per dag op time_of_day
+        time_order = {"ochtend": 0, "middag": 1, "avond": 2}
+        for day_name in schedule:
+            schedule[day_name]["tasks"].sort(key=lambda t: time_order.get(t.get("time_of_day", "avond"), 1))
+
+        return schedule
+
     def _build_schedule_from_stored(self, stored_assignments: list, completions: list,
                                       week_start: date, day_availability: dict,
                                       tasks_lookup: dict) -> dict:
@@ -971,7 +1141,10 @@ class TaskEngine:
 
         Args:
             tasks_lookup: Dict van task display_name -> Task object voor snelle lookup
+
+        Detecteert ook gemiste taken (dag is voorbij, taak niet gedaan) en markeert deze.
         """
+        today = today_local()
         schedule = {}
         for day_idx in range(7):
             day_name = DAY_NAMES[day_idx]
@@ -1000,6 +1173,9 @@ class TaskEngine:
                     matched_completions.add(c.id)
                     break
 
+            # Check of dit een gemiste taak is (dag voorbij, niet gedaan)
+            is_missed = not completed and day_date < today
+
             # Haal time_of_day op uit de lookup (geen database query!)
             task = tasks_lookup.get(assignment.task_name)
             time_of_day = task.time_of_day if task else "avond"
@@ -1010,7 +1186,8 @@ class TaskEngine:
                 "completed": completed,
                 "completed_by": done_by if completed else None,
                 "time_of_day": time_of_day,
-                "extra": False
+                "extra": False,
+                "missed": is_missed  # Nieuw: gemist (papa/mama heeft het gedaan)
             })
 
         # Voeg "extra" completions toe die niet in het rooster stonden
@@ -1033,7 +1210,8 @@ class TaskEngine:
                 "completed": True,
                 "completed_by": c.member_name,
                 "time_of_day": time_of_day,
-                "extra": True  # Markeer als extra/bonus taak
+                "extra": True,  # Markeer als extra/bonus taak
+                "missed": False
             })
 
         # Sorteer taken per dag op time_of_day
@@ -1044,8 +1222,14 @@ class TaskEngine:
         return schedule
 
     def _generate_new_schedule(self, members: list, tasks: list, completions: list,
-                                 day_availability: dict, week_start: date) -> tuple:
-        """Genereer een nieuw weekrooster en geef ook de assignments terug voor opslag."""
+                                 day_availability: dict, week_start: date,
+                                 month_completions: list = None) -> tuple:
+        """Genereer een nieuw weekrooster met eerlijke verdeling.
+
+        De verdeling houdt rekening met:
+        - Hoeveel taken iemand deze WEEK al heeft
+        - Hoeveel taken iemand deze MAAND al heeft (voor eerlijkheid over langere termijn)
+        """
         schedule = {}
         assignments_to_save = []
 
@@ -1057,8 +1241,17 @@ class TaskEngine:
                 "tasks": []
             }
 
-        # Track hoeveel taken per persoon en per tijdslot per dag
+        # Track hoeveel taken per persoon deze week
         member_week_counts = {m.name: 0 for m in members}
+
+        # Track hoeveel van ELKE TAAK per persoon deze maand (voor eerlijke verdeling)
+        member_month_task_counts = {m.name: {} for m in members}
+        if month_completions:
+            for c in month_completions:
+                if c.member_name in member_month_task_counts:
+                    task_counts = member_month_task_counts[c.member_name]
+                    task_counts[c.task_name] = task_counts.get(c.task_name, 0) + 1
+
         # Track welke tijdslots al bezet zijn per dag per persoon
         # Format: {day_idx: {member_name: set(time_slots)}}
         member_day_slots = {day_idx: {m.name: set() for m in members} for day_idx in range(7)}
@@ -1105,8 +1298,10 @@ class TaskEngine:
                         })
                 else:
                     # Kies beschikbare persoon met minste taken EN beschikbare tijdslot
+                    # Nu ook met maandelijkse balancering per taaktype
                     assigned = self._select_member_for_task(
-                        task, available_members, member_week_counts, member_day_slots[day_idx]
+                        task, available_members, member_week_counts, member_day_slots[day_idx],
+                        member_month_task_counts=member_month_task_counts
                     )
 
                     if assigned:
@@ -1135,9 +1330,17 @@ class TaskEngine:
         return schedule, assignments_to_save
 
     def _select_member_for_task(self, task: Task, available_members: list,
-                                   member_week_counts: dict, member_day_slots: dict) -> Optional[Member]:
-        """Selecteer het beste lid voor een taak, rekening houdend met tijdslots."""
+                                   member_week_counts: dict, member_day_slots: dict,
+                                   member_month_task_counts: dict = None) -> Optional[Member]:
+        """Selecteer het beste lid voor een taak.
+
+        Selectiecriteria (in volgorde van prioriteit):
+        1. Tijdslot moet vrij zijn
+        2. Minste keer deze specifieke taak gedaan deze MAAND (eerlijke verdeling)
+        3. Minste taken deze WEEK (als maand gelijk is)
+        """
         time_slot = task.time_of_day
+        task_name = task.display_name
 
         # Filter op wie dit tijdslot nog vrij heeft vandaag
         eligible = [
@@ -1152,17 +1355,42 @@ class TaskEngine:
         if not eligible:
             return None
 
-        # Sorteer op aantal taken (minste eerst)
-        sorted_eligible = sorted(eligible, key=lambda m: member_week_counts.get(m.name, 0))
+        # Sorteer op:
+        # 1. Maandelijkse count voor DEZE TAAK (primair - voor eerlijke verdeling per taaktype)
+        # 2. Wekelijkse totaal (secundair - voor eerlijke verdeling binnen de week)
+        def sort_key(m):
+            month_task_count = 0
+            if member_month_task_counts and m.name in member_month_task_counts:
+                month_task_count = member_month_task_counts[m.name].get(task_name, 0)
+            week_count = member_week_counts.get(m.name, 0)
+            return (month_task_count, week_count)
+
+        sorted_eligible = sorted(eligible, key=sort_key)
         return sorted_eligible[0]
 
     def _count_member_tasks(self, schedule: dict, members: list) -> dict:
-        """Tel hoeveel taken per lid in het rooster staan."""
+        """Tel hoeveel taken per lid deze week.
+
+        Telt correct:
+        - Voltooide taken: telt voor wie het DEED (completed_by)
+        - Nog te doen taken: telt voor wie GEPLAND staat (assigned_to)
+        - Gemiste taken: telt NIET (worden apart herplant)
+        """
         counts = {m.name: 0 for m in members}
         for day_data in schedule.values():
             for task_info in day_data.get("tasks", []):
-                name = task_info.get("assigned_to")
-                if name in counts:
+                # Gemiste taken niet tellen (die worden herplant)
+                if task_info.get("missed"):
+                    continue
+
+                if task_info.get("completed"):
+                    # Voltooide taak: tel voor wie het DEED
+                    name = task_info.get("completed_by")
+                else:
+                    # Nog te doen: tel voor wie gepland staat
+                    name = task_info.get("assigned_to")
+
+                if name and name in counts:
                     counts[name] += 1
         return counts
 
@@ -1289,9 +1517,11 @@ class TaskEngine:
                     lines.append("║    (geen taken gepland)                           ║")
             else:
                 for day_task in day_tasks:
-                    # Bepaal icoon: ✅ gedaan, ⬜ nog te doen
+                    # Bepaal icoon: ✅ gedaan, ❌ gemist (papa/mama deed het), ⬜ nog te doen
                     if day_task["completed"] or day_task.get("extra"):
                         check = "✅"
+                    elif day_task.get("missed"):
+                        check = "❌"  # Gemist - papa/mama heeft het gedaan
                     else:
                         check = "⬜"
                     # Toon wie het DEED (completed_by) als af, anders wie GEPLAND staat
