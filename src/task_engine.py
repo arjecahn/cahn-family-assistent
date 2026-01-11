@@ -1505,6 +1505,8 @@ class TaskEngine:
                 if min_spacing:
                     # Gebruik spacing-aware selectie met load balancing
                     selected = self._select_days_with_spacing(suitable_days, target, min_spacing, day_task_count)
+                    for day_idx in selected:
+                        day_task_count[day_idx] += 1
                 else:
                     # Balancerende selectie: kies steeds de dag met minste taken
                     for i in range(target):
@@ -1513,6 +1515,9 @@ class TaskEngine:
 
                         for day_idx in suitable_days:
                             if day_idx in selected:
+                                continue
+                            # HARDE LIMIET CHECK
+                            if day_task_count[day_idx] >= MAX_TASKS_PER_DAY:
                                 continue
 
                             # Score gebaseerd op huidige belasting vs ideaal
@@ -1552,9 +1557,11 @@ class TaskEngine:
 
         selected = []
 
-        # Sorteer op load (minste taken eerst) als we day_task_count hebben
+        # Filter eerst dagen die al vol zitten
         if day_task_count:
-            sorted_days = sorted(suitable_days, key=lambda d: day_task_count.get(d, 0))
+            available_days = [d for d in suitable_days if day_task_count.get(d, 0) < MAX_TASKS_PER_DAY]
+            # Sorteer op load (minste taken eerst)
+            sorted_days = sorted(available_days, key=lambda d: day_task_count.get(d, 0))
         else:
             sorted_days = sorted(suitable_days)
 
