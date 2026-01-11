@@ -155,6 +155,58 @@
         }
       }
     },
+    "/api/schedule": {
+      "get": {
+        "operationId": "getWeekSchedule",
+        "summary": "Haal het weekrooster op met per-dag planning",
+        "description": "Geeft een volledig weekrooster met wie welke taak moet doen per dag. Bevat ook een ASCII/emoji overzicht dat direct getoond kan worden. BELANGRIJK: Roep dit aan bij elke nieuwe conversatie om het huidige rooster te tonen.",
+        "responses": {
+          "200": {
+            "description": "Weekrooster met ASCII overzicht",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "week_number": { "type": "integer", "description": "ISO week nummer" },
+                    "week_start": { "type": "string", "description": "Startdatum van de week (maandag)" },
+                    "schedule": {
+                      "type": "object",
+                      "description": "Per dag de taken met toegewezen persoon en status",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "date": { "type": "string" },
+                          "emoji": { "type": "string" },
+                          "tasks": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "task_name": { "type": "string" },
+                                "assigned_to": { "type": "string" },
+                                "completed": { "type": "boolean" },
+                                "time_of_day": { "type": "string" }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "ascii_overview": { "type": "string", "description": "ASCII/emoji weekoverzicht om direct te tonen" },
+                    "member_totals": {
+                      "type": "object",
+                      "description": "Totaal aantal taken per persoon deze week",
+                      "additionalProperties": { "type": "integer" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/absence": {
       "post": {
         "operationId": "registerAbsence",

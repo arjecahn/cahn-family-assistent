@@ -1,10 +1,14 @@
 """Core logica voor eerlijke takenverdeling."""
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 from dataclasses import dataclass
 
 from .models import Member, Task, Completion
 from . import database as db
+
+# Dag namen in het Nederlands
+DAY_NAMES = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"]
+DAY_EMOJIS = ["🌙", "🔥", "💧", "⚡", "🌸", "🌟", "☀️"]
 
 
 @dataclass
@@ -265,6 +269,181 @@ class TaskEngine:
         if not member:
             return []
         return db.get_pending_swaps_for_member(member.id)
+
+
+    def get_week_schedule(self) -> dict:
+        """
+        Genereer een weekrooster met wie wat moet doen per dag.
+
+        Returns een dict met:
+        - schedule: per dag een lijst van taken met toegewezen persoon
+        - completed: welke taken al zijn gedaan
+        - ascii_overview: ASCII/emoji overzicht
+        """
+        week_number = self.get_current_week()
+        week_start = self.get_week_start(week_number)
+        members = db.get_all_members()
+        tasks = db.get_all_tasks()
+
+        # Haal alle completions voor deze week op
+        all_completions = []
+        for member in members:
+            completions = db.get_completions_for_member(member.id, week_number)
+            all_completions.extend(completions)
+
+        # Bouw het schema per dag
+        schedule = {}
+        for day_idx in range(7):
+            day_date = week_start + timedelta(days=day_idx)
+            day_name = DAY_NAMES[day_idx]
+            schedule[day_name] = {
+                "date": day_date.isoformat(),
+                "emoji": DAY_EMOJIS[day_idx],
+                "tasks": []
+            }
+
+        # Verdeel taken over de week
+        # Avondtaken: elke dag (behalve zondag voor sommige taken)
+        # Ochtendtaken: schooldagen (ma-vr)
+        # Middag taken: flexibel verdeeld over de week
+
+        task_assignments = []
+
+        for task in tasks:
+            weekly_target = task.weekly_target
+
+            if task.time_of_day == "ochtend":
+                # Ochtendtaken alleen op schooldagen (ma-vr)
+                days = [0, 1, 2, 3, 4][:weekly_target]
+            elif task.time_of_day == "avond":
+                # Avondtaken elke dag
+                days = list(range(min(weekly_target, 7)))
+            else:  # middag
+                # Middag taken verspreid over de week
+                if weekly_target <= 3:
+                    days = [1, 3, 5][:weekly_target]  # di, do, za
+                else:
+                    days = list(range(weekly_target))
+
+            for day_idx in days:
+                if day_idx < 7:
+                    task_assignments.append({
+                        "task": task,
+                        "day_idx": day_idx,
+                        "day_name": DAY_NAMES[day_idx]
+                    })
+
+        # Tel hoeveel taken elk lid al heeft (voor eerlijke verdeling)
+        member_task_counts = {m.name: 0 for m in members}
+        for c in all_completions:
+            if c.member_name in member_task_counts:
+                member_task_counts[c.member_name] += 1
+
+        # Wijs taken toe aan leden (round-robin, rekening houdend met huidige verdeling)
+        # Sorteer leden op aantal taken (minste eerst)
+        def get_next_member():
+            sorted_members = sorted(members, key=lambda m: member_task_counts[m.name])
+            return sorted_members[0]
+
+        # Groepeer taken per dag en wijs toe
+        daily_assignments = {day: [] for day in DAY_NAMES}
+
+        for assignment in task_assignments:
+            day_name = assignment["day_name"]
+            task = assignment["task"]
+
+            # Check of deze taak al is gedaan vandaag
+            day_date = week_start + timedelta(days=assignment["day_idx"])
+            already_done = False
+            done_by = None
+
+            for c in all_completions:
+                if c.task_id == task.id and c.completed_at.date() == day_date:
+                    already_done = True
+                    done_by = c.member_name
+                    break
+
+            if already_done:
+                daily_assignments[day_name].append({
+                    "task_name": task.display_name,
+                    "assigned_to": done_by,
+                    "completed": True,
+                    "time_of_day": task.time_of_day
+                })
+            else:
+                # Wijs toe aan lid met minste taken
+                assigned = get_next_member()
+                member_task_counts[assigned.name] += 1
+                daily_assignments[day_name].append({
+                    "task_name": task.display_name,
+                    "assigned_to": assigned.name,
+                    "completed": False,
+                    "time_of_day": task.time_of_day
+                })
+
+        # Sorteer taken per dag op time_of_day
+        time_order = {"ochtend": 0, "middag": 1, "avond": 2}
+        for day_name in daily_assignments:
+            daily_assignments[day_name].sort(key=lambda t: time_order.get(t["time_of_day"], 1))
+            schedule[day_name]["tasks"] = daily_assignments[day_name]
+
+        # Genereer ASCII/emoji overzicht
+        ascii_overview = self._generate_ascii_schedule(schedule, week_start)
+
+        return {
+            "week_number": week_number,
+            "week_start": week_start.isoformat(),
+            "schedule": schedule,
+            "ascii_overview": ascii_overview,
+            "member_totals": member_task_counts
+        }
+
+    def _generate_ascii_schedule(self, schedule: dict, week_start: date) -> str:
+        """Genereer een ASCII/emoji weekoverzicht."""
+        lines = []
+
+        # Header
+        lines.append("╔════════════════════════════════════════════════════════════════╗")
+        lines.append(f"║  📅 WEEKROOSTER week {self.get_current_week()}                                    ║")
+        lines.append("╠════════════════════════════════════════════════════════════════╣")
+
+        today = date.today()
+
+        for day_idx, day_name in enumerate(DAY_NAMES):
+            day_data = schedule[day_name]
+            day_date = week_start + timedelta(days=day_idx)
+            emoji = day_data["emoji"]
+
+            # Markeer vandaag
+            if day_date == today:
+                day_marker = "👉"
+            elif day_date < today:
+                day_marker = "  "
+            else:
+                day_marker = "  "
+
+            # Dag header
+            date_str = day_date.strftime("%d/%m")
+            lines.append(f"║ {day_marker}{emoji} {day_name.upper():<10} ({date_str})                              ║")
+
+            tasks = day_data["tasks"]
+            if not tasks:
+                lines.append("║      (geen taken)                                             ║")
+            else:
+                for task in tasks:
+                    check = "✅" if task["completed"] else "⬜"
+                    name = task["assigned_to"]
+                    task_name = task["task_name"][:20]
+                    # Pad task line to fit in box
+                    line = f"{check} {name}: {task_name}"
+                    lines.append(f"║      {line:<56}║")
+
+            if day_idx < 6:
+                lines.append("║────────────────────────────────────────────────────────────────║")
+
+        lines.append("╚════════════════════════════════════════════════════════════════╝")
+
+        return "\n".join(lines)
 
 
 # Singleton instance

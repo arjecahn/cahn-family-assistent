@@ -194,6 +194,16 @@ async def weekly_summary():
     return engine.get_weekly_summary()
 
 
+@app.get("/api/schedule")
+async def week_schedule():
+    """Haal het weekrooster op met ASCII/emoji overzicht.
+
+    Dit toont per dag wie welke taken moet doen, met afvinkbare checkboxes.
+    Gebruik dit om het rooster te tonen aan de kinderen.
+    """
+    return engine.get_week_schedule()
+
+
 @app.post("/api/swap/request")
 async def request_swap(request: SwapRequest):
     """Vraag een ruil aan."""
