@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+venv/
+*.db
+.vercel
+.DS_Store
+data/
+*.json
+!vercel.json
+!package.json
