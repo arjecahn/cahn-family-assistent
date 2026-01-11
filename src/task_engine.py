@@ -458,8 +458,14 @@ class TaskEngine:
         Raises:
             ValueError: Als een member of task niet gevonden wordt (geen enkele taak wordt opgeslagen)
         """
-        # Eerst valideren - als iets niet klopt, stoppen we voordat we iets opslaan
+        # Eerst valideren en data voorbereiden
         completions_to_add = []
+        validated_items = []  # Voor herplanning na opslaan
+
+        # Bouw tasks lookup voor performance
+        all_tasks = db.get_all_tasks()
+        tasks_lookup = {t.display_name: t for t in all_tasks}
+        tasks_by_name = {t.name: t for t in all_tasks}
 
         for item in tasks_data:
             member = db.get_member_by_name(item["member_name"])
@@ -470,12 +476,15 @@ class TaskEngine:
             if not task:
                 raise ValueError(f"Taak '{item['task_name']}' niet gevonden")
 
-            # Bepaal week nummer
+            # Bepaal week nummer en datum
             completed_date = item.get("completed_date")
             if completed_date:
                 week_number = completed_date.isocalendar()[1]
+                year = completed_date.isocalendar()[0]
             else:
+                completed_date = today_local()
                 week_number = self.get_current_week()
+                year = completed_date.isocalendar()[0]
 
             completions_to_add.append({
                 "task_id": task.id,
@@ -486,8 +495,35 @@ class TaskEngine:
                 "completed_date": completed_date
             })
 
+            validated_items.append({
+                "member": member,
+                "task": task,
+                "week_number": week_number,
+                "year": year,
+                "day_of_week": completed_date.weekday()
+            })
+
         # Alles gevalideerd - nu opslaan in één transactie
-        return db.add_completions_bulk(completions_to_add)
+        completions = db.add_completions_bulk(completions_to_add)
+
+        # === HERPLANNING ===
+        # Voor elke completion, update het rooster als nodig
+        for item in validated_items:
+            week_number = item["week_number"]
+            year = item["year"]
+
+            # Check of er een rooster bestaat voor deze week
+            if db.schedule_exists_for_week(week_number, year):
+                self._handle_rescheduling(
+                    item["member"],
+                    item["task"],
+                    week_number,
+                    year,
+                    item["day_of_week"],
+                    tasks_lookup=tasks_lookup
+                )
+
+        return completions
 
     def register_absence(
         self,
