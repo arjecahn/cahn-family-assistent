@@ -228,34 +228,156 @@ class TaskEngine:
 
         return completion
 
+    def _handle_batch_rescheduling(self, day_items: list, week_number: int, year: int,
+                                      day_of_week: int, tasks_lookup: dict):
+        """Handle herplanning voor een batch van completions op dezelfde dag.
+
+        Dit is beter dan individuele herplanning omdat:
+        1. Alle wijzigingen worden eerst geanalyseerd
+        2. Swaps worden gedetecteerd (A deed B's taak en B deed A's taak)
+        3. Daarna worden assignments in de juiste volgorde geüpdatet
+
+        Args:
+            day_items: Lijst van dicts met member, task, etc.
+            week_number: ISO weeknummer
+            year: Jaar
+            day_of_week: 0=maandag, 6=zondag
+            tasks_lookup: Dict van task display_name -> Task object
+        """
+        # Haal assignments voor deze dag op (EENMALIG)
+        day_assignments = db.get_assignments_for_day(week_number, year, day_of_week)
+
+        if not day_assignments:
+            return
+
+        # Check of dit verleden is
+        today = today_local()
+        week_start = self.get_week_start(week_number)
+        completion_date = week_start + timedelta(days=day_of_week)
+        is_past = completion_date < today
+
+        # Bouw lookup: task_name -> assignment
+        assignment_by_task = {a.task_name: a for a in day_assignments}
+        # Bouw lookup: member_id -> [assignments]
+        assignments_by_member = {}
+        for a in day_assignments:
+            if a.member_id not in assignments_by_member:
+                assignments_by_member[a.member_id] = []
+            assignments_by_member[a.member_id].append(a)
+
+        # === FASE 1: Analyseer alle completions ===
+        # completed_task -> member die het deed
+        who_did_what = {}
+        # member -> task die ze hadden moeten doen (in hetzelfde tijdslot)
+        member_original_task = {}
+
+        for item in day_items:
+            member = item["member"]
+            task = item["task"]
+            who_did_what[task.display_name] = member
+
+            # Vind wat dit lid eigenlijk zou moeten doen (zelfde tijdslot)
+            time_slot = task.time_of_day
+            member_assignments = assignments_by_member.get(member.id, [])
+            for a in member_assignments:
+                if a.task_name != task.display_name:
+                    orig_task = tasks_lookup.get(a.task_name)
+                    if orig_task and orig_task.time_of_day == time_slot:
+                        member_original_task[member.id] = a
+                        break
+
+        # === FASE 2: Detecteer swaps ===
+        # Een swap is wanneer A deed wat B zou doen EN B deed wat A zou doen
+        swaps = []  # [(member_A, member_B, task_A, task_B)]
+        processed_members = set()
+
+        for item in day_items:
+            member = item["member"]
+            task = item["task"]
+
+            if member.id in processed_members:
+                continue
+
+            # Vind wie deze taak oorspronkelijk zou doen
+            original_assignment = assignment_by_task.get(task.display_name)
+            if not original_assignment or original_assignment.member_id == member.id:
+                continue  # Geen swap nodig
+
+            original_member_id = original_assignment.member_id
+            original_member_name = original_assignment.member_name
+
+            # Check of de originele assignee een taak van dit member heeft gedaan
+            my_original = member_original_task.get(member.id)
+            if my_original:
+                other_doer = who_did_what.get(my_original.task_name)
+                if other_doer and other_doer.id == original_member_id:
+                    # Het is een swap!
+                    swaps.append((member, other_doer, task, tasks_lookup.get(my_original.task_name)))
+                    processed_members.add(member.id)
+                    processed_members.add(original_member_id)
+
+        # === FASE 3: Pas swaps toe ===
+        for member_a, member_b, task_a, task_b in swaps:
+            # member_a deed task_a (was voor member_b)
+            # member_b deed task_b (was voor member_a)
+            assignment_a = assignment_by_task.get(task_a.display_name)
+            assignment_b = assignment_by_task.get(task_b.display_name) if task_b else None
+
+            if assignment_a:
+                db.update_assignment(assignment_a.id, member_a.id, member_a.name)
+            if assignment_b:
+                db.update_assignment(assignment_b.id, member_b.id, member_b.name)
+
+        # === FASE 4: Verwerk resterende (niet-swap) wijzigingen ===
+        for item in day_items:
+            member = item["member"]
+            task = item["task"]
+
+            if member.id in processed_members:
+                continue  # Al verwerkt als swap
+
+            # Normale herplanning voor individuele wijziging
+            self._handle_rescheduling(
+                member, task, week_number, year, day_of_week,
+                tasks_lookup=tasks_lookup
+            )
+
     def _handle_rescheduling(self, member: Member, completed_task: Task,
                                week_number: int, year: int, day_of_week: int,
                                tasks_lookup: Optional[dict] = None):
         """Handle herplanning wanneer iemand een andere taak deed dan gepland.
 
         Scenario: Nora stond ingepland voor inruimen, maar deed dekken.
-        - inruimen moet worden herplant naar een andere dag/persoon
+        - De dekken assignment wordt geüpdatet naar Nora
+        - Voor VANDAAG/TOEKOMST: inruimen wordt herplant naar andere dag/persoon
+        - Voor VERLEDEN: inruimen assignment wordt geüpdatet naar wie vrijkwam (swap)
         """
-        # Haal de assignments van vandaag op voor dit lid
-        today_assignments = db.get_assignments_for_day(week_number, year, day_of_week)
+        # Haal de assignments van deze dag op
+        day_assignments = db.get_assignments_for_day(week_number, year, day_of_week)
 
         # Bouw tasks lookup als we die nog niet hebben (performance)
         if not tasks_lookup:
             all_tasks = db.get_all_tasks()
             tasks_lookup = {t.display_name: t for t in all_tasks}
 
+        # Check of dit een verleden datum is
+        today = today_local()
+        week_start = self.get_week_start(week_number)
+        completion_date = week_start + timedelta(days=day_of_week)
+        is_past = completion_date < today
+
         # Vind de assignment voor de completed task
         completed_assignment = None
-        for a in today_assignments:
+        for a in day_assignments:
             if a.task_name == completed_task.display_name:
                 completed_assignment = a
                 break
 
-        # Vind wat dit lid eigenlijk zou moeten doen vandaag (zelfde tijdslot)
+        # Vind wat dit lid eigenlijk zou moeten doen (zelfde tijdslot)
         time_slot = completed_task.time_of_day
         member_original_assignment = None
 
-        for a in today_assignments:
+        for a in day_assignments:
             if a.member_id == member.id and a.task_name != completed_task.display_name:
                 # Check of het in hetzelfde tijdslot zit (via lookup, geen DB query)
                 original_task = tasks_lookup.get(a.task_name)
@@ -263,26 +385,36 @@ class TaskEngine:
                     member_original_assignment = a
                     break
 
-        # BELANGRIJK: Eerst de completed_assignment updaten, zodat de originele
-        # persoon (bijv. Linde) vrij is wanneer we gaan herplannen.
-        # Volgorde is cruciaal!
+        # Update de completed_assignment naar de persoon die het echt deed
         original_assignee = None
+        original_assignee_id = None
         if completed_assignment and completed_assignment.member_id != member.id:
-            # Onthoud wie de taak oorspronkelijk zou doen (voor herplanning)
+            # Onthoud wie de taak oorspronkelijk zou doen
             original_assignee = completed_assignment.member_name
+            original_assignee_id = completed_assignment.member_id
             # Update de assignment naar de persoon die het echt deed
             db.update_assignment(completed_assignment.id, member.id, member.name)
 
-        # Nu herplannen: het lid dat de taak overnam, had wellicht een andere taak
+        # Handle de originele assignment van dit lid
         if member_original_assignment:
-            self._reschedule_task(
-                member_original_assignment,
-                week_number,
-                year,
-                day_of_week,
-                preferred_member=original_assignee,  # Geef voorkeur aan wie vrijkwam
-                tasks_lookup=tasks_lookup
-            )
+            if is_past:
+                # VERLEDEN: Direct swappen - geef de taak aan wie vrijkwam
+                if original_assignee and original_assignee_id:
+                    # Directe swap: geef member's originele taak aan de vrijgekomen persoon
+                    db.update_assignment(member_original_assignment.id,
+                                        original_assignee_id, original_assignee)
+                # Als niemand vrijkwam, laat de assignment zoals die is
+                # (wordt later mogelijk door een andere completion geüpdatet)
+            else:
+                # VANDAAG/TOEKOMST: Herplan naar andere dag/persoon
+                self._reschedule_task(
+                    member_original_assignment,
+                    week_number,
+                    year,
+                    day_of_week,
+                    preferred_member=original_assignee,
+                    tasks_lookup=tasks_lookup
+                )
 
     def _reschedule_task(self, original_assignment: ScheduleAssignment,
                           week_number: int, year: int, current_day: int,
@@ -506,21 +638,21 @@ class TaskEngine:
         # Alles gevalideerd - nu opslaan in één transactie
         completions = db.add_completions_bulk(completions_to_add)
 
-        # === HERPLANNING ===
-        # Voor elke completion, update het rooster als nodig
+        # === BATCH HERPLANNING ===
+        # Groepeer items per (week, year, day) zodat alle wijzigingen voor dezelfde dag
+        # in één keer worden verwerkt - dit voorkomt dat wijziging 1 invloed heeft op wijziging 2
+        items_by_day = {}
         for item in validated_items:
-            week_number = item["week_number"]
-            year = item["year"]
+            key = (item["week_number"], item["year"], item["day_of_week"])
+            if key not in items_by_day:
+                items_by_day[key] = []
+            items_by_day[key].append(item)
 
-            # Check of er een rooster bestaat voor deze week
+        # Verwerk elke dag als batch
+        for (week_number, year, day_of_week), day_items in items_by_day.items():
             if db.schedule_exists_for_week(week_number, year):
-                self._handle_rescheduling(
-                    item["member"],
-                    item["task"],
-                    week_number,
-                    year,
-                    item["day_of_week"],
-                    tasks_lookup=tasks_lookup
+                self._handle_batch_rescheduling(
+                    day_items, week_number, year, day_of_week, tasks_lookup
                 )
 
         return completions
