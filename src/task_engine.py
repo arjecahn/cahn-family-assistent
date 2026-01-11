@@ -257,28 +257,35 @@ class TaskEngine:
                     member_original_assignment = a
                     break
 
-        # Als dit lid een andere taak had in hetzelfde tijdslot, moet die herplant worden
+        # BELANGRIJK: Eerst de completed_assignment updaten, zodat de originele
+        # persoon (bijv. Linde) vrij is wanneer we gaan herplannen.
+        # Volgorde is cruciaal!
+        original_assignee = None
+        if completed_assignment and completed_assignment.member_id != member.id:
+            # Onthoud wie de taak oorspronkelijk zou doen (voor herplanning)
+            original_assignee = completed_assignment.member_name
+            # Update de assignment naar de persoon die het echt deed
+            db.update_assignment(completed_assignment.id, member.id, member.name)
+
+        # Nu herplannen: het lid dat de taak overnam, had wellicht een andere taak
         if member_original_assignment:
             self._reschedule_task(
                 member_original_assignment,
                 week_number,
                 year,
-                day_of_week
+                day_of_week,
+                preferred_member=original_assignee  # Geef voorkeur aan wie vrijkwam
             )
 
-        # Als iemand anders de completed_task zou doen, update die assignment
-        if completed_assignment and completed_assignment.member_id != member.id:
-            # De originele persoon hoeft deze taak niet meer te doen
-            # Update de assignment naar de persoon die het echt deed
-            db.update_assignment(completed_assignment.id, member.id, member.name)
-
     def _reschedule_task(self, original_assignment: ScheduleAssignment,
-                          week_number: int, year: int, current_day: int):
+                          week_number: int, year: int, current_day: int,
+                          preferred_member: Optional[str] = None):
         """Herplan een taak naar een andere dag/persoon.
 
         Prioriteit:
-        1. Dezelfde dag, ander beschikbaar kind
-        2. Volgende dagen in de week
+        1. De preferred_member (als die beschikbaar is en tijdslot vrij heeft)
+        2. Dezelfde dag, ander beschikbaar kind
+        3. Volgende dagen in de week
         """
         task = db.get_task_by_name(original_assignment.task_name)
         if not task:
@@ -293,7 +300,7 @@ class TaskEngine:
         # Bereken beschikbaarheid
         day_availability = self._calculate_day_availability(members, week_start, week_absences)
 
-        # Haal alle bestaande assignments op voor de week
+        # Haal alle bestaande assignments op voor de week (VERS ophalen na update)
         all_assignments = db.get_schedule_for_week(week_number, year)
 
         # Track hoeveel taken per persoon deze week heeft
@@ -311,11 +318,20 @@ class TaskEngine:
                     member_day_slots[a.day_of_week][a.member_name].add(a_task.time_of_day)
 
         time_slot = task.time_of_day
-
-        # Probeer eerst dezelfde dag met een ander beschikbaar kind
         day_name = DAY_NAMES[current_day]
         available_today = day_availability.get(day_name, [])
 
+        # Prioriteit 1: preferred_member (degene wiens taak werd overgenomen)
+        if preferred_member:
+            for m in available_today:
+                if m.name == preferred_member:
+                    if time_slot not in member_day_slots[current_day].get(m.name, set()):
+                        # Preferred member kan het vandaag doen!
+                        db.update_assignment(original_assignment.id, m.id, m.name)
+                        return
+                    break  # Preferred member gevonden maar kan niet, ga door met anderen
+
+        # Prioriteit 2: dezelfde dag, ander beschikbaar kind
         for m in sorted(available_today, key=lambda x: member_counts.get(x.name, 0)):
             if m.id == original_assignment.member_id:
                 continue  # Skip de originele persoon
