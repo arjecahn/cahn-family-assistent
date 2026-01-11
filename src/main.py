@@ -118,6 +118,15 @@ class TaskCompletionRequest(BaseModel):
     task_name: str
 
 
+class BulkCompletionItem(BaseModel):
+    member_name: str
+    task_name: str
+
+
+class BulkCompletionRequest(BaseModel):
+    completions: list[BulkCompletionItem]
+
+
 class AbsenceRequest(BaseModel):
     member_name: str
     start_date: date
@@ -174,6 +183,41 @@ async def complete_task(request: TaskCompletionRequest):
         }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/complete/bulk")
+async def complete_tasks_bulk(request: BulkCompletionRequest):
+    """Registreer meerdere taken in één keer.
+
+    Gebruik dit als meerdere kinderen taken hebben gedaan.
+    Elke completion bevat expliciet welk kind welke taak heeft gedaan.
+    """
+    results = []
+    errors = []
+
+    for item in request.completions:
+        try:
+            completion = engine.complete_task(item.member_name, item.task_name)
+            results.append({
+                "member_name": item.member_name,
+                "task_name": item.task_name,
+                "success": True,
+                "completion_id": completion.id
+            })
+        except ValueError as e:
+            errors.append({
+                "member_name": item.member_name,
+                "task_name": item.task_name,
+                "success": False,
+                "error": str(e)
+            })
+
+    return {
+        "success": len(errors) == 0,
+        "message": f"{len(results)} taken geregistreerd" + (f", {len(errors)} fouten" if errors else ""),
+        "results": results,
+        "errors": errors
+    }
 
 
 @app.post("/api/undo")

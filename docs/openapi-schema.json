@@ -90,7 +90,7 @@
       "post": {
         "operationId": "completeTask",
         "summary": "Registreer dat iemand een taak heeft gedaan",
-        "description": "Elk gezinslid kan ELKE taak voltooien, ongeacht het rooster. Registreer wat er daadwerkelijk is gedaan. Bij meerdere taken: roep meerdere keren aan.",
+        "description": "Voor één taak. Bij MEERDERE taken: gebruik /api/complete/bulk om verwarring te voorkomen.",
         "requestBody": {
           "required": true,
           "content": {
@@ -123,6 +123,56 @@
                     "success": { "type": "boolean" },
                     "message": { "type": "string" },
                     "completion_id": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/complete/bulk": {
+      "post": {
+        "operationId": "completeTasksBulk",
+        "summary": "Registreer meerdere taken in één keer",
+        "description": "GEBRUIK DIT bij meerdere taken tegelijk. Voorkomt verwarring over wie wat deed.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "completions": {
+                    "type": "array",
+                    "description": "Lijst van taken met expliciet wie wat deed",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "member_name": { "type": "string", "description": "Naam: Nora, Linde of Fenna" },
+                        "task_name": { "type": "string", "description": "Taak die deze persoon deed" }
+                      },
+                      "required": ["member_name", "task_name"]
+                    }
+                  }
+                },
+                "required": ["completions"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Taken geregistreerd",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "results": { "type": "array" },
+                    "errors": { "type": "array" }
                   }
                 }
               }
