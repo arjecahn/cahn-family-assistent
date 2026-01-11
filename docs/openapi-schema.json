@@ -141,11 +141,27 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": {
-                    "type": "object",
-                    "properties": {
-                      "total": { "type": "integer" },
-                      "tasks": { "type": "object" }
+                  "properties": {
+                    "Nora": {
+                      "type": "object",
+                      "properties": {
+                        "total": { "type": "integer", "description": "Totaal aantal taken" },
+                        "tasks": { "type": "object", "description": "Taken per type" }
+                      }
+                    },
+                    "Linde": {
+                      "type": "object",
+                      "properties": {
+                        "total": { "type": "integer", "description": "Totaal aantal taken" },
+                        "tasks": { "type": "object", "description": "Taken per type" }
+                      }
+                    },
+                    "Fenna": {
+                      "type": "object",
+                      "properties": {
+                        "total": { "type": "integer", "description": "Totaal aantal taken" },
+                        "tasks": { "type": "object", "description": "Taken per type" }
+                      }
                     }
                   }
                 }
@@ -172,32 +188,17 @@
                     "week_start": { "type": "string", "description": "Startdatum van de week (maandag)" },
                     "schedule": {
                       "type": "object",
-                      "description": "Per dag de taken met toegewezen persoon en status",
-                      "additionalProperties": {
-                        "type": "object",
-                        "properties": {
-                          "date": { "type": "string" },
-                          "emoji": { "type": "string" },
-                          "tasks": {
-                            "type": "array",
-                            "items": {
-                              "type": "object",
-                              "properties": {
-                                "task_name": { "type": "string" },
-                                "assigned_to": { "type": "string" },
-                                "completed": { "type": "boolean" },
-                                "time_of_day": { "type": "string" }
-                              }
-                            }
-                          }
-                        }
-                      }
+                      "description": "Per dag de taken met toegewezen persoon en status"
                     },
                     "ascii_overview": { "type": "string", "description": "ASCII/emoji weekoverzicht om direct te tonen" },
                     "member_totals": {
                       "type": "object",
                       "description": "Totaal aantal taken per persoon deze week",
-                      "additionalProperties": { "type": "integer" }
+                      "properties": {
+                        "Nora": { "type": "integer" },
+                        "Linde": { "type": "integer" },
+                        "Fenna": { "type": "integer" }
+                      }
                     }
                   }
                 }
