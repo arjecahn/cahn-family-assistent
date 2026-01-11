@@ -122,13 +122,13 @@ Bij ELKE nieuwe conversatie: roep EERST de getWeekSchedule action aan en toon he
 
 ## Taken (afspraken 2026)
 De planning is FLEXIBEL - taken worden verdeeld op basis van wie er is, niet op vaste dagen.
-- Uitruimen ochtend: 3x/week totaal (vóór school, uiterlijk 11:00)
-- Uitruimen avond: 6x/week totaal (+ pannen + planken schoon)
-- Inruimen: 6x/week totaal (+ aanrecht schoon)
-- Dekken: 6x/week totaal (+ tafel afnemen na eten)
-- Karton/papier: 3x/week totaal
-- Glas: 1x/week totaal
-- Koken: 1x/week totaal
+- Uitruimen ochtend: 3x/week totaal, alleen doordeweekse dagen (vóór school, uiterlijk 11:00)
+- Uitruimen avond: 7x/week totaal (+ pannen + planken schoon)
+- Inruimen: 7x/week totaal (+ aanrecht schoon)
+- Dekken: 7x/week totaal (+ tafel afnemen na eten)
+- Karton/papier: 2x/week totaal, met altijd zeker 2 dagen ertussen (tenzij een kind eerder wil)
+- Glas: 1x/week totaal, zorg dat er altijd zeker 5 dagen tussen zitten (tenzij een kind eerder wil)
+- Koken: 1x/maand per kind, zorg dat er altijd zeker 5 dagen tussen zitten (tenzij een kind eerder wil)
 
 ## Werkwijze
 

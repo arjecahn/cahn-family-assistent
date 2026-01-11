@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Cahn Family Task API",
-    "description": "API voor de Cahn Family Task Assistant - eerlijke takenverdeling voor het gezin. Taken: uitruimen ochtend (1x/week), uitruimen avond (2x/week), inruimen (2x/week), dekken (2x/week), karton/papier (1x/week), glas (1x/3 weken), koken (1x/3 weken).",
+    "description": "API voor de Cahn Family Task Assistant - eerlijke takenverdeling voor het gezin. Taken: uitruimen ochtend (3x/week totaal), uitruimen avond (7x/week), inruimen (7x/week), dekken (7x/week), karton/papier (2x/week), glas (1x/week), koken (1x/maand per kind).",
     "version": "3.0.0"
   },
   "servers": [

@@ -260,37 +260,37 @@ def seed_initial_data():
             "uitruimen_avond",
             "uitruimen avond",
             "Afwasmachine uitruimen in de avond + pannen schoonmaken + planken schoonmaken.",
-            6, 2, 1, "avond"
+            7, 2, 1, "avond"
         ),
         (
             "inruimen",
             "inruimen",
             "Afwasmachine inruimen in de avond + aanrecht schoonmaken.",
-            6, 2, 1, "avond"
+            7, 2, 1, "avond"
         ),
         (
             "dekken",
             "dekken",
             "Tafel dekken voor het avondeten + na het eten de tafel afnemen en zorgen dat die schoon is.",
-            6, 2, 1, "avond"
+            7, 2, 1, "avond"
         ),
         (
             "karton_papier",
             "karton en papier wegbrengen",
             "Karton en oud papier verzamelen en naar de container brengen.",
-            3, 1, 1, "middag"
+            2, 1, 1, "middag"
         ),
         (
             "glas",
             "glas wegbrengen",
-            "Glas verzamelen en naar de glasbak brengen. Elk kind 1x per 3 weken.",
-            1, 1, 3, "middag"
+            "Glas verzamelen en naar de glasbak brengen. 1x per week totaal.",
+            1, 1, 1, "middag"
         ),
         (
             "koken",
             "koken",
-            "Een maaltijd koken voor het gezin. Elk kind 1x per 3 weken.",
-            1, 1, 3, "avond"
+            "Een maaltijd koken voor het gezin. Elk kind 1x per maand.",
+            1, 1, 4, "avond"
         ),
     ]
     for name, display_name, description, weekly_target, per_child, rotation, time in tasks:
@@ -344,37 +344,37 @@ def reset_tasks_2026():
             "uitruimen_avond",
             "uitruimen avond",
             "Afwasmachine uitruimen in de avond + pannen schoonmaken + planken schoonmaken.",
-            6, 2, 1, "avond"
+            7, 2, 1, "avond"
         ),
         (
             "inruimen",
             "inruimen",
             "Afwasmachine inruimen in de avond + aanrecht schoonmaken.",
-            6, 2, 1, "avond"
+            7, 2, 1, "avond"
         ),
         (
             "dekken",
             "dekken",
             "Tafel dekken voor het avondeten + na het eten de tafel afnemen en zorgen dat die schoon is.",
-            6, 2, 1, "avond"
+            7, 2, 1, "avond"
         ),
         (
             "karton_papier",
             "karton en papier wegbrengen",
             "Karton en oud papier verzamelen en naar de container brengen.",
-            3, 1, 1, "middag"
+            2, 1, 1, "middag"
         ),
         (
             "glas",
             "glas wegbrengen",
-            "Glas verzamelen en naar de glasbak brengen. Elk kind 1x per 3 weken.",
-            1, 1, 3, "middag"
+            "Glas verzamelen en naar de glasbak brengen. 1x per week totaal.",
+            1, 1, 1, "middag"
         ),
         (
             "koken",
             "koken",
-            "Een maaltijd koken voor het gezin. Elk kind 1x per 3 weken.",
-            1, 1, 3, "avond"
+            "Een maaltijd koken voor het gezin. Elk kind 1x per maand.",
+            1, 1, 4, "avond"
         ),
     ]
     for name, display_name, description, weekly_target, per_child, rotation, time in tasks:
