@@ -29,6 +29,11 @@ TASK_MIN_SPACING = {
 # Maximum aantal taken per dag (harde limiet)
 MAX_TASKS_PER_DAY = 5
 
+# Taken die meerdere tijdslots blokkeren (bijv. koken blokkeert avond + middag)
+TASK_BLOCKS_SLOTS = {
+    "koken": ["avond", "middag"],  # Wie kookt, doet geen karton/glas die dag
+}
+
 # Dag namen in het Nederlands
 DAY_NAMES = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"]
 DAY_EMOJIS = ["🌙", "🔥", "💧", "⚡", "🌸", "🌟", "☀️"]
@@ -1036,7 +1041,13 @@ class TaskEngine:
 
                 if assigned and not task_info.get("missed"):
                     time_slot = task_info.get("time_of_day", "avond")
-                    member_day_slots[day_idx][assigned].add(time_slot)
+                    # Check of deze taak meerdere slots blokkeert
+                    task_obj = tasks_lookup.get(t_name)
+                    if task_obj and task_obj.name in TASK_BLOCKS_SLOTS:
+                        for slot in TASK_BLOCKS_SLOTS[task_obj.name]:
+                            member_day_slots[day_idx][assigned].add(slot)
+                    else:
+                        member_day_slots[day_idx][assigned].add(time_slot)
 
                     # Track taken met spacing requirements
                     if t_name not in task_scheduled_days:
@@ -1130,8 +1141,12 @@ class TaskEngine:
                         "rescheduled_from": missed["original_day"]  # Track waar het vandaan komt
                     })
 
-                    # Update tijdslot tracking
-                    member_day_slots[target_day_idx][original_member].add(time_slot)
+                    # Update tijdslot tracking - check of taak meerdere slots blokkeert
+                    if task.name in TASK_BLOCKS_SLOTS:
+                        for slot in TASK_BLOCKS_SLOTS[task.name]:
+                            member_day_slots[target_day_idx][original_member].add(slot)
+                    else:
+                        member_day_slots[target_day_idx][original_member].add(time_slot)
                     # Update task scheduling tracking
                     if task_name not in task_scheduled_days:
                         task_scheduled_days[task_name] = []
@@ -1344,7 +1359,10 @@ class TaskEngine:
 
                     if assigned:
                         member_week_counts[assigned.name] += 1
-                        member_day_slots[day_idx][assigned.name].add(task.time_of_day)
+                        # Blokkeer tijdslot(s) - sommige taken blokkeren meerdere slots
+                        blocked_slots = TASK_BLOCKS_SLOTS.get(task.name, [task.time_of_day])
+                        for slot in blocked_slots:
+                            member_day_slots[day_idx][assigned.name].add(slot)
 
                         schedule[day_name]["tasks"].append({
                             "task_name": task.display_name,
@@ -1373,7 +1391,7 @@ class TaskEngine:
         """Selecteer het beste lid voor een taak.
 
         Selectiecriteria (in volgorde van prioriteit):
-        1. Tijdslot moet vrij zijn
+        1. Tijdslot moet vrij zijn (STRIKT - geen fallback!)
         2. Minste keer deze specifieke taak gedaan deze MAAND (eerlijke verdeling)
         3. Minste taken deze WEEK (als maand gelijk is)
         """
@@ -1381,17 +1399,14 @@ class TaskEngine:
         task_name = task.display_name
 
         # Filter op wie dit tijdslot nog vrij heeft vandaag
+        # STRIKT: als niemand vrij is, return None (geen dubbele avondtaken!)
         eligible = [
             m for m in available_members
             if time_slot not in member_day_slots.get(m.name, set())
         ]
 
         if not eligible:
-            # Als niemand dit tijdslot vrij heeft, kies dan gewoon degene met minste taken
-            eligible = available_members
-
-        if not eligible:
-            return None
+            return None  # Niemand beschikbaar - taak kan niet op deze dag
 
         # Sorteer op:
         # 1. Maandelijkse count voor DEZE TAAK (primair - voor eerlijke verdeling per taaktype)
