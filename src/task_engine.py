@@ -401,10 +401,17 @@ class TaskEngine:
         - Taken worden verdeeld op basis van weekly_target
         - Voorkeur voor dagen waar mensen beschikbaar zijn
         - Spreiding over de week voor afwisseling
+        - Taken met lagere targets worden verspreid over verschillende dagen
         """
         task_days = {}
 
-        for task in tasks:
+        # Sorteer taken op target (hoogste eerst), zodat dagelijkse taken eerst komen
+        sorted_tasks = sorted(tasks, key=lambda t: -t.weekly_target)
+
+        # Track hoeveel taken per dag al zijn toegewezen (voor balans)
+        day_task_count = {day_idx: 0 for day_idx in range(7)}
+
+        for task in sorted_tasks:
             target = task.weekly_target
             task_days[task.name] = []
 
@@ -424,16 +431,42 @@ class TaskEngine:
             if target >= len(suitable_days):
                 # Taak moet (bijna) elke dag: gebruik alle beschikbare dagen
                 task_days[task.name] = suitable_days[:target]
+                for day_idx in task_days[task.name]:
+                    day_task_count[day_idx] += 1
             else:
-                # Verspreid taken zo goed mogelijk
-                # Bijv. 3 taken over 7 dagen: dag 0, 2, 4 of 1, 3, 5 etc.
-                step = len(suitable_days) / target
+                # Verspreid taken zo goed mogelijk met voorkeur voor minst belaste dagen
+                # Sorteer geschikte dagen op huidige belasting
+                sorted_suitable = sorted(suitable_days, key=lambda d: day_task_count[d])
+
+                # Kies de dagen met minste taken, maar wel verspreid
                 selected = []
+                step = len(suitable_days) / target
+
                 for i in range(target):
-                    idx = int(i * step)
-                    if idx < len(suitable_days):
-                        selected.append(suitable_days[idx])
-                task_days[task.name] = selected
+                    # Bereken ideale positie in de week
+                    ideal_pos = i * step
+                    # Vind de dag dichtstbij ideale positie die nog niet gekozen is
+                    best_day = None
+                    best_score = float('inf')
+
+                    for day_idx in suitable_days:
+                        if day_idx in selected:
+                            continue
+                        # Score = afstand van ideale positie + belasting penalty
+                        pos_in_suitable = suitable_days.index(day_idx)
+                        distance = abs(pos_in_suitable - ideal_pos)
+                        load_penalty = day_task_count[day_idx] * 0.5
+                        score = distance + load_penalty
+
+                        if score < best_score:
+                            best_score = score
+                            best_day = day_idx
+
+                    if best_day is not None:
+                        selected.append(best_day)
+                        day_task_count[best_day] += 1
+
+                task_days[task.name] = sorted(selected)
 
         return task_days
 
