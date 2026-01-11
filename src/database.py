@@ -2,10 +2,24 @@
 import os
 from datetime import date, datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
 from .models import Member, Task, Completion, Absence, Swap
+
+# Timezone voor de familie (Nederland)
+TIMEZONE = ZoneInfo("Europe/Amsterdam")
+
+
+def now_local() -> datetime:
+    """Geef huidige tijd in lokale timezone."""
+    return datetime.now(TIMEZONE)
+
+
+def today_local() -> date:
+    """Geef huidige datum in lokale timezone."""
+    return datetime.now(TIMEZONE).date()
 
 # Database URL - Supabase/Vercel zetten verschillende variabelen
 def get_database_url():
@@ -43,7 +57,7 @@ def get_db():
 
 
 def init_db():
-    """Maak de database tabellen aan."""
+    """Maak de database tabellen aan met CASCADE DELETE constraints."""
     conn = get_db()
     cur = conn.cursor()
 
@@ -67,14 +81,15 @@ def init_db():
         )
     """)
 
+    # Completions met CASCADE DELETE (als task of member wordt verwijderd, ook completions verwijderen)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS completions (
             id SERIAL PRIMARY KEY,
-            task_id INTEGER REFERENCES tasks(id),
-            member_id INTEGER REFERENCES members(id),
+            task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+            member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
             member_name VARCHAR(50),
             task_name VARCHAR(100),
-            completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
             week_number INTEGER
         )
     """)
@@ -82,7 +97,7 @@ def init_db():
     cur.execute("""
         CREATE TABLE IF NOT EXISTS absences (
             id SERIAL PRIMARY KEY,
-            member_id INTEGER REFERENCES members(id),
+            member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
             member_name VARCHAR(50),
             start_date DATE NOT NULL,
             end_date DATE NOT NULL,
@@ -93,21 +108,105 @@ def init_db():
     cur.execute("""
         CREATE TABLE IF NOT EXISTS swaps (
             id SERIAL PRIMARY KEY,
-            requester_id INTEGER REFERENCES members(id),
+            requester_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
             requester_name VARCHAR(50),
-            target_id INTEGER REFERENCES members(id),
+            target_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
             target_name VARCHAR(50),
-            task_id INTEGER REFERENCES tasks(id),
+            task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
             task_name VARCHAR(100),
             swap_date DATE,
             status VARCHAR(20) DEFAULT 'pending',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
     conn.commit()
     cur.close()
     conn.close()
+
+
+def migrate_add_cascade_delete():
+    """Migratie: voeg CASCADE DELETE toe aan bestaande foreign keys.
+
+    Dit is nodig voor databases die zijn aangemaakt voordat CASCADE werd toegevoegd.
+    Veilig om meerdere keren uit te voeren.
+    """
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        # Completions table
+        # Drop oude constraints en maak nieuwe met CASCADE
+        cur.execute("""
+            DO $$
+            BEGIN
+                -- completions.task_id
+                IF EXISTS (SELECT 1 FROM information_schema.table_constraints
+                           WHERE constraint_name = 'completions_task_id_fkey') THEN
+                    ALTER TABLE completions DROP CONSTRAINT completions_task_id_fkey;
+                END IF;
+                ALTER TABLE completions
+                    ADD CONSTRAINT completions_task_id_fkey
+                    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE;
+
+                -- completions.member_id
+                IF EXISTS (SELECT 1 FROM information_schema.table_constraints
+                           WHERE constraint_name = 'completions_member_id_fkey') THEN
+                    ALTER TABLE completions DROP CONSTRAINT completions_member_id_fkey;
+                END IF;
+                ALTER TABLE completions
+                    ADD CONSTRAINT completions_member_id_fkey
+                    FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE;
+
+                -- absences.member_id
+                IF EXISTS (SELECT 1 FROM information_schema.table_constraints
+                           WHERE constraint_name = 'absences_member_id_fkey') THEN
+                    ALTER TABLE absences DROP CONSTRAINT absences_member_id_fkey;
+                END IF;
+                ALTER TABLE absences
+                    ADD CONSTRAINT absences_member_id_fkey
+                    FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE;
+
+                -- swaps.requester_id
+                IF EXISTS (SELECT 1 FROM information_schema.table_constraints
+                           WHERE constraint_name = 'swaps_requester_id_fkey') THEN
+                    ALTER TABLE swaps DROP CONSTRAINT swaps_requester_id_fkey;
+                END IF;
+                ALTER TABLE swaps
+                    ADD CONSTRAINT swaps_requester_id_fkey
+                    FOREIGN KEY (requester_id) REFERENCES members(id) ON DELETE CASCADE;
+
+                -- swaps.target_id
+                IF EXISTS (SELECT 1 FROM information_schema.table_constraints
+                           WHERE constraint_name = 'swaps_target_id_fkey') THEN
+                    ALTER TABLE swaps DROP CONSTRAINT swaps_target_id_fkey;
+                END IF;
+                ALTER TABLE swaps
+                    ADD CONSTRAINT swaps_target_id_fkey
+                    FOREIGN KEY (target_id) REFERENCES members(id) ON DELETE CASCADE;
+
+                -- swaps.task_id
+                IF EXISTS (SELECT 1 FROM information_schema.table_constraints
+                           WHERE constraint_name = 'swaps_task_id_fkey') THEN
+                    ALTER TABLE swaps DROP CONSTRAINT swaps_task_id_fkey;
+                END IF;
+                ALTER TABLE swaps
+                    ADD CONSTRAINT swaps_task_id_fkey
+                    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE;
+            END $$;
+        """)
+
+        conn.commit()
+        print("CASCADE DELETE constraints toegevoegd!")
+
+    except Exception as e:
+        conn.rollback()
+        print(f"Migratie fout: {e}")
+        raise e
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 def seed_initial_data():
@@ -386,13 +485,13 @@ def add_completion(completion_data: dict) -> Completion:
     conn = get_db()
     cur = conn.cursor()
 
-    # Gebruik opgegeven datum of huidige tijd
+    # Gebruik opgegeven datum of huidige tijd (in lokale timezone)
     completed_date = completion_data.get("completed_date")
     if completed_date:
-        # Zet date om naar datetime (middag van die dag)
-        completed_at = datetime.combine(completed_date, datetime.min.time().replace(hour=12))
+        # Zet date om naar datetime (middag van die dag, lokale tijd)
+        completed_at = datetime.combine(completed_date, datetime.min.time().replace(hour=12), tzinfo=TIMEZONE)
     else:
-        completed_at = datetime.utcnow()
+        completed_at = now_local()
 
     cur.execute("""
         INSERT INTO completions (task_id, member_id, member_name, task_name, week_number, completed_at)
@@ -413,6 +512,58 @@ def add_completion(completion_data: dict) -> Completion:
     # Maak return object (zonder completed_date veld dat niet in model zit)
     return_data = {k: v for k, v in completion_data.items() if k != "completed_date"}
     return Completion(id=str(new_id), completed_at=completed_at, **return_data)
+
+
+def add_completions_bulk(completions_data: list[dict]) -> list[Completion]:
+    """Voeg meerdere voltooide taken toe in één transactie.
+
+    Als één insert faalt, worden ALLE inserts teruggedraaid (rollback).
+    Dit voorkomt partial failures.
+    """
+    if not completions_data:
+        return []
+
+    conn = get_db()
+    cur = conn.cursor()
+    results = []
+
+    try:
+        for completion_data in completions_data:
+            # Gebruik opgegeven datum of huidige tijd (in lokale timezone)
+            completed_date = completion_data.get("completed_date")
+            if completed_date:
+                completed_at = datetime.combine(completed_date, datetime.min.time().replace(hour=12), tzinfo=TIMEZONE)
+            else:
+                completed_at = now_local()
+
+            cur.execute("""
+                INSERT INTO completions (task_id, member_id, member_name, task_name, week_number, completed_at)
+                VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
+            """, (
+                int(completion_data["task_id"]),
+                int(completion_data["member_id"]),
+                completion_data["member_name"],
+                completion_data["task_name"],
+                completion_data["week_number"],
+                completed_at
+            ))
+            new_id = cur.fetchone()["id"]
+
+            return_data = {k: v for k, v in completion_data.items() if k != "completed_date"}
+            results.append(Completion(id=str(new_id), completed_at=completed_at, **return_data))
+
+        # Commit alleen als ALLES is gelukt
+        conn.commit()
+        return results
+
+    except Exception as e:
+        # Rollback bij elke fout
+        conn.rollback()
+        raise e
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 def get_last_completion_for_task(member_id: str, task_id: str) -> Optional[Completion]:

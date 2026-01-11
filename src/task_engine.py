@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from .models import Member, Task, Completion
 from . import database as db
+from .database import now_local, today_local, TIMEZONE
 
 # Dag namen in het Nederlands
 DAY_NAMES = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"]
@@ -39,19 +40,19 @@ class TaskEngine:
 
     def get_current_week(self) -> int:
         """Geef het huidige ISO weeknummer."""
-        return date.today().isocalendar()[1]
+        return today_local().isocalendar()[1]
 
     def get_week_start(self, week_number: Optional[int] = None) -> date:
         """Geef de startdatum (maandag) van een week."""
         if week_number is None:
             week_number = self.get_current_week()
-        year = date.today().year
+        year = today_local().year
         return date.fromisocalendar(year, week_number, 1)
 
     def is_member_available(self, member: Member, check_date: Optional[date] = None) -> bool:
         """Check of een gezinslid beschikbaar is (niet afwezig)."""
         if check_date is None:
-            check_date = date.today()
+            check_date = today_local()
         absence = db.get_absence_for_date(member.id, check_date)
         return absence is None
 
@@ -99,7 +100,7 @@ class TaskEngine:
 
         # Recency score: 0 = net gedaan, 1 = lang geleden of nooit
         if last_did:
-            days_ago = (datetime.utcnow() - last_did).days
+            days_ago = (now_local() - last_did).days
             recency_score = min(days_ago / 7, 1.0)
         else:
             recency_score = 1.0
@@ -204,6 +205,49 @@ class TaskEngine:
         })
 
         return completion
+
+    def complete_tasks_bulk(self, tasks_data: list[dict]) -> list[Completion]:
+        """Registreer meerdere taken in één transactie.
+
+        Args:
+            tasks_data: Lijst van dicts met member_name, task_name, en optioneel completed_date
+
+        Returns:
+            Lijst van Completion objecten
+
+        Raises:
+            ValueError: Als een member of task niet gevonden wordt (geen enkele taak wordt opgeslagen)
+        """
+        # Eerst valideren - als iets niet klopt, stoppen we voordat we iets opslaan
+        completions_to_add = []
+
+        for item in tasks_data:
+            member = db.get_member_by_name(item["member_name"])
+            if not member:
+                raise ValueError(f"Gezinslid '{item['member_name']}' niet gevonden")
+
+            task = db.get_task_by_name(item["task_name"])
+            if not task:
+                raise ValueError(f"Taak '{item['task_name']}' niet gevonden")
+
+            # Bepaal week nummer
+            completed_date = item.get("completed_date")
+            if completed_date:
+                week_number = completed_date.isocalendar()[1]
+            else:
+                week_number = self.get_current_week()
+
+            completions_to_add.append({
+                "task_id": task.id,
+                "member_id": member.id,
+                "member_name": member.name,
+                "task_name": task.display_name,
+                "week_number": week_number,
+                "completed_date": completed_date
+            })
+
+        # Alles gevalideerd - nu opslaan in één transactie
+        return db.add_completions_bulk(completions_to_add)
 
     def register_absence(
         self,
@@ -510,7 +554,7 @@ class TaskEngine:
         lines.append(f"║  📅 WEEKROOSTER week {week_num:<2}                          ║")
         lines.append("╠═══════════════════════════════════════════════════╣")
 
-        today = date.today()
+        today = today_local()
         # Gebruik meegegeven members of haal ze op (fallback)
         all_members = members if members else db.get_all_members()
 
@@ -576,7 +620,7 @@ class TaskEngine:
         """Bereken per taak hoeveel elke persoon heeft gedaan deze maand."""
         import calendar
 
-        today = date.today()
+        today = today_local()
         year = today.year
         month = today.month
 

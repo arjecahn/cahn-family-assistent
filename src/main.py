@@ -9,7 +9,8 @@ from typing import Optional
 from .task_engine import engine
 from .database import (
     seed_initial_data, reset_tasks_2026, get_all_tasks,
-    get_member_by_name, get_last_completion_for_member, delete_completion
+    get_member_by_name, get_last_completion_for_member, delete_completion,
+    migrate_add_cascade_delete
 )
 from .voice_handlers import handle_google_action
 
@@ -64,6 +65,21 @@ async def init_database():
     try:
         seed_initial_data()
         return {"status": "ok", "message": "Database geinitialiseerd"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/migrate/cascade")
+async def run_cascade_migration():
+    """Voer migratie uit om CASCADE DELETE toe te voegen aan foreign keys.
+
+    Dit zorgt ervoor dat bij het verwijderen van een task of member,
+    de gerelateerde completions/absences/swaps automatisch worden verwijderd.
+    Veilig om meerdere keren uit te voeren.
+    """
+    try:
+        migrate_add_cascade_delete()
+        return {"status": "ok", "message": "CASCADE DELETE constraints toegevoegd"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -188,43 +204,43 @@ async def complete_task(request: TaskCompletionRequest):
 
 @app.post("/api/complete/bulk")
 async def complete_tasks_bulk(request: BulkCompletionRequest):
-    """Registreer meerdere taken in één keer.
+    """Registreer meerdere taken in één transactie.
 
-    Gebruik dit als meerdere kinderen taken hebben gedaan.
-    Elke completion bevat expliciet welk kind welke taak heeft gedaan.
-    Optioneel kan per taak een datum worden meegegeven.
+    ALLES slaagt of NIETS slaagt - geen partial failures.
+    Als één taak of persoon niet gevonden wordt, worden geen taken opgeslagen.
     """
-    results = []
-    errors = []
-
-    for item in request.completions:
-        try:
-            completion = engine.complete_task(
-                item.member_name,
-                item.task_name,
-                item.completed_date
-            )
-            results.append({
+    try:
+        # Converteer request naar list of dicts
+        tasks_data = [
+            {
                 "member_name": item.member_name,
                 "task_name": item.task_name,
-                "completed_date": item.completed_date.isoformat() if item.completed_date else None,
-                "success": True,
-                "completion_id": completion.id
-            })
-        except ValueError as e:
-            errors.append({
-                "member_name": item.member_name,
-                "task_name": item.task_name,
-                "success": False,
-                "error": str(e)
-            })
+                "completed_date": item.completed_date
+            }
+            for item in request.completions
+        ]
 
-    return {
-        "success": len(errors) == 0,
-        "message": f"{len(results)} taken geregistreerd" + (f", {len(errors)} fouten" if errors else ""),
-        "results": results,
-        "errors": errors
-    }
+        # Voer alles uit in één transactie
+        completions = engine.complete_tasks_bulk(tasks_data)
+
+        return {
+            "success": True,
+            "message": f"{len(completions)} taken geregistreerd",
+            "results": [
+                {
+                    "member_name": c.member_name,
+                    "task_name": c.task_name,
+                    "completion_id": c.id
+                }
+                for c in completions
+            ]
+        }
+    except ValueError as e:
+        # Validation error - niets is opgeslagen
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        # Database error - alles is teruggedraaid
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
 @app.post("/api/undo")
