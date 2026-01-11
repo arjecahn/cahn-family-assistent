@@ -1289,10 +1289,8 @@ class TaskEngine:
                     lines.append("║    (geen taken gepland)                           ║")
             else:
                 for day_task in day_tasks:
-                    # Bepaal icoon: ✅ gedaan, 🌟 extra (niet gepland), ⬜ nog te doen
-                    if day_task.get("extra"):
-                        check = "🌟"  # Extra taak (niet gepland maar wel gedaan)
-                    elif day_task["completed"]:
+                    # Bepaal icoon: ✅ gedaan, ⬜ nog te doen
+                    if day_task["completed"] or day_task.get("extra"):
                         check = "✅"
                     else:
                         check = "⬜"
