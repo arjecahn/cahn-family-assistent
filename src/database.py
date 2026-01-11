@@ -998,6 +998,104 @@ def add_assignment(week_number: int, year: int, day_of_week: int, task_id: str, 
     )
 
 
+def get_week_schedule_data(week_number: int, year: int, week_start: date, week_end: date, month: int) -> dict:
+    """Haal ALLE data op voor get_week_schedule in één database connectie.
+
+    Dit is veel sneller dan 7+ losse queries met elk een eigen connectie.
+    Retourneert een dict met: members, tasks, completions, absences, schedule_exists, schedule, month_completions
+    """
+    conn = get_db()
+    cur = conn.cursor()
+
+    result = {}
+
+    # 1. Members
+    cur.execute("SELECT id, name FROM members")
+    rows = cur.fetchall()
+    result["members"] = [Member(id=str(r["id"]), name=r["name"]) for r in rows]
+
+    # 2. Tasks
+    cur.execute("SELECT id, name, display_name, description, weekly_target, per_child_target, rotation_weeks, time_of_day FROM tasks")
+    rows = cur.fetchall()
+    result["tasks"] = [Task(
+        id=str(r["id"]),
+        name=r["name"],
+        display_name=r["display_name"] or r["name"],
+        description=r["description"] or "",
+        weekly_target=r["weekly_target"] or 0,
+        per_child_target=r["per_child_target"] or 0,
+        rotation_weeks=r["rotation_weeks"] or 1,
+        time_of_day=r["time_of_day"] or ""
+    ) for r in rows]
+
+    # 3. Completions for week
+    cur.execute("""
+        SELECT id, task_id, member_id, member_name, task_name, completed_at, week_number
+        FROM completions WHERE week_number = %s
+    """, (week_number,))
+    rows = cur.fetchall()
+    result["completions"] = [Completion(id=str(r["id"]), task_id=str(r["task_id"]), member_id=str(r["member_id"]),
+                       member_name=r["member_name"], task_name=r["task_name"],
+                       completed_at=r["completed_at"], week_number=r["week_number"]) for r in rows]
+
+    # 4. Absences for week
+    cur.execute("""
+        SELECT id, member_id, member_name, start_date, end_date, reason
+        FROM absences
+        WHERE start_date <= %s AND end_date >= %s
+    """, (week_end, week_start))
+    rows = cur.fetchall()
+    result["absences"] = [Absence(id=str(r["id"]), member_id=str(r["member_id"]), member_name=r["member_name"],
+                   start_date=r["start_date"], end_date=r["end_date"], reason=r["reason"]) for r in rows]
+
+    # 5. Check if schedule exists
+    cur.execute("""
+        SELECT COUNT(*) as count FROM schedule_assignments
+        WHERE week_number = %s AND year = %s
+    """, (week_number, year))
+    result["schedule_exists"] = cur.fetchone()["count"] > 0
+
+    # 6. Get schedule if exists
+    if result["schedule_exists"]:
+        cur.execute("""
+            SELECT id, week_number, year, day_of_week, task_id, task_name, member_id, member_name, created_at
+            FROM schedule_assignments
+            WHERE week_number = %s AND year = %s
+            ORDER BY day_of_week, task_name
+        """, (week_number, year))
+        rows = cur.fetchall()
+        result["schedule"] = [ScheduleAssignment(
+            id=str(r["id"]),
+            week_number=r["week_number"],
+            year=r["year"],
+            day_of_week=r["day_of_week"],
+            task_id=str(r["task_id"]),
+            task_name=r["task_name"],
+            member_id=str(r["member_id"]),
+            member_name=r["member_name"],
+            created_at=r["created_at"]
+        ) for r in rows]
+    else:
+        result["schedule"] = []
+
+    # 7. Monthly completions (for stats)
+    cur.execute("""
+        SELECT id, task_id, member_id, member_name, task_name, completed_at, week_number
+        FROM completions
+        WHERE EXTRACT(YEAR FROM completed_at) = %s
+          AND EXTRACT(MONTH FROM completed_at) = %s
+    """, (year, month))
+    rows = cur.fetchall()
+    result["month_completions"] = [Completion(id=str(r["id"]), task_id=str(r["task_id"]), member_id=str(r["member_id"]),
+                       member_name=r["member_name"], task_name=r["task_name"],
+                       completed_at=r["completed_at"], week_number=r["week_number"]) for r in rows]
+
+    cur.close()
+    conn.close()
+
+    return result
+
+
 def migrate_add_schedule_table():
     """Migratie: voeg schedule_assignments tabel toe aan bestaande database."""
     conn = get_db()

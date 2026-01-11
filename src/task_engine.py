@@ -724,16 +724,21 @@ class TaskEngine:
         - completed: welke taken al zijn gedaan
         - ascii_overview: ASCII/emoji overzicht
         """
+        today = today_local()
         week_number = self.get_current_week()
-        year = today_local().year
+        year = today.year
+        month = today.month
         week_start = self.get_week_start(week_number)
         week_end = week_start + timedelta(days=6)
 
-        # === BATCH QUERIES ===
-        members = db.get_all_members()
-        tasks = db.get_all_tasks()
-        all_completions = db.get_completions_for_week(week_number)
-        week_absences = db.get_absences_for_week(week_start, week_end)
+        # === SINGLE BATCH QUERY - alle data in 1 connectie ===
+        batch_data = db.get_week_schedule_data(week_number, year, week_start, week_end, month)
+
+        members = batch_data["members"]
+        tasks = batch_data["tasks"]
+        all_completions = batch_data["completions"]
+        week_absences = batch_data["absences"]
+        month_completions = batch_data["month_completions"]
 
         # Maak lookup dict voor snelle task lookup (voorkomt N+1 queries)
         tasks_lookup = {t.display_name: t for t in tasks}
@@ -742,9 +747,9 @@ class TaskEngine:
         day_availability = self._calculate_day_availability(members, week_start, week_absences)
 
         # Check of er al een rooster bestaat voor deze week
-        if db.schedule_exists_for_week(week_number, year):
-            # Laad opgeslagen rooster
-            stored_assignments = db.get_schedule_for_week(week_number, year)
+        if batch_data["schedule_exists"]:
+            # Laad opgeslagen rooster (al opgehaald in batch)
+            stored_assignments = batch_data["schedule"]
             schedule = self._build_schedule_from_stored(
                 stored_assignments, all_completions, week_start, day_availability, tasks_lookup
             )
@@ -759,10 +764,10 @@ class TaskEngine:
         # Tel taken per persoon (gebaseerd op assignments + completions)
         member_week_counts = self._count_member_tasks(schedule, members)
 
-        # Genereer ASCII/emoji overzicht
+        # Genereer ASCII/emoji overzicht (met month_completions voor stats)
         ascii_overview = self._generate_ascii_schedule(
             schedule, week_start, day_availability, member_week_counts,
-            members=members, tasks=tasks
+            members=members, tasks=tasks, month_completions=month_completions
         )
 
         return {
@@ -1044,7 +1049,8 @@ class TaskEngine:
 
     def _generate_ascii_schedule(self, schedule: dict, week_start: date,
                                    day_availability: dict, member_totals: dict,
-                                   members: list = None, tasks: list = None) -> str:
+                                   members: list = None, tasks: list = None,
+                                   month_completions: list = None) -> str:
         """Genereer een ASCII/emoji weekoverzicht."""
         lines = []
 
@@ -1098,7 +1104,7 @@ class TaskEngine:
 
         # Maandoverzicht per taak per persoon
         lines.append("╠═══════════════════════════════════════════════════╣")
-        month_stats = self._get_monthly_task_stats(members=all_members, tasks=tasks)
+        month_stats = self._get_monthly_task_stats(members=all_members, tasks=tasks, completions=month_completions)
         month_name = MONTH_NAMES[today.month].upper()
         lines.append(f"║  📊 STAND {month_name:<38}║")
         lines.append("║                    Nora  Linde Fenna              ║")
@@ -1116,7 +1122,8 @@ class TaskEngine:
 
         return "\n".join(lines)
 
-    def _get_monthly_task_stats(self, members: list = None, tasks: list = None) -> dict:
+    def _get_monthly_task_stats(self, members: list = None, tasks: list = None,
+                                   completions: list = None) -> dict:
         """Bereken per taak hoeveel elke persoon heeft gedaan deze maand."""
         import calendar
 
@@ -1128,8 +1135,9 @@ class TaskEngine:
         _, days_in_month = calendar.monthrange(year, month)
         weeks_in_month = days_in_month / 7
 
-        # Haal alle completions voor deze maand op (1 query)
-        completions = db.get_completions_for_month(year, month)
+        # Gebruik meegegeven completions of haal op (fallback)
+        if completions is None:
+            completions = db.get_completions_for_month(year, month)
 
         # Gebruik meegegeven data of haal op (fallback)
         if tasks is None:
