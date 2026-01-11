@@ -3,7 +3,7 @@
   "info": {
     "title": "Cahn Family Task API",
     "description": "API voor de Cahn Family Task Assistant - eerlijke takenverdeling voor het gezin. Taken: uitruimen ochtend (1x/week), uitruimen avond (2x/week), inruimen (2x/week), dekken (2x/week), karton/papier (1x/week), glas (1x/3 weken), koken (1x/3 weken).",
-    "version": "2.0.0"
+    "version": "3.0.0"
   },
   "servers": [
     {
@@ -227,7 +227,7 @@
       "get": {
         "operationId": "getWeekSchedule",
         "summary": "Haal het weekrooster op met per-dag planning",
-        "description": "Geeft een SUGGESTIE voor wie welke taak zou kunnen doen per dag. Dit is GEEN verplichting - kinderen mogen onderling wisselen of andere taken doen. Registreer altijd wat er DAADWERKELIJK is gedaan, niet wat gepland stond. Bevat ook een ASCII/emoji overzicht dat direct getoond kan worden.",
+        "description": "Persistent weekrooster: wordt eenmalig gegenereerd en opgeslagen bij eerste aanvraag van de week. Bevat ASCII/emoji overzicht. Als iemand een andere taak doet dan gepland, wordt automatisch herplant.",
         "responses": {
           "200": {
             "description": "Weekrooster met ASCII overzicht",
@@ -260,11 +260,11 @@
         }
       }
     },
-    "/api/undo": {
+    "/api/undo/task": {
       "post": {
-        "operationId": "undoLastTask",
-        "summary": "Maak de laatst voltooide taak ongedaan",
-        "description": "Verwijdert de laatst geregistreerde taak voor een gezinslid. Handig als iemand per ongeluk de verkeerde taak heeft afgevinkt.",
+        "operationId": "undoSpecificTask",
+        "summary": "Maak een specifieke taak ongedaan",
+        "description": "AANBEVOLEN undo methode. Maak een specifieke taak van een specifiek persoon ongedaan. De taak wordt weer op het rooster gezet (herplanning). Beter dan /api/undo omdat het geen conflicten geeft bij meerdere sessies.",
         "requestBody": {
           "required": true,
           "content": {
@@ -274,10 +274,19 @@
                 "properties": {
                   "member_name": {
                     "type": "string",
-                    "description": "Naam van het gezinslid: Nora, Linde of Fenna"
+                    "description": "Wie de taak had gedaan: Nora, Linde of Fenna"
+                  },
+                  "task_name": {
+                    "type": "string",
+                    "description": "Welke taak: dekken, inruimen, uitruimen, etc."
+                  },
+                  "completed_date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Datum (YYYY-MM-DD), optioneel - default is vandaag"
                   }
                 },
-                "required": ["member_name"]
+                "required": ["member_name", "task_name"]
               }
             }
           }
@@ -292,7 +301,33 @@
                   "properties": {
                     "success": { "type": "boolean" },
                     "message": { "type": "string" },
-                    "undone_task": { "type": "string", "description": "Naam van de ongedaan gemaakte taak (alleen bij success)" }
+                    "undone_task": { "type": "string" },
+                    "rescheduled": { "type": "boolean", "description": "Of de taak is herplant" },
+                    "rescheduled_to": { "type": "string", "description": "Naar wie de taak is herplant" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/schedule/regenerate": {
+      "post": {
+        "operationId": "regenerateSchedule",
+        "summary": "Forceer regenereren van weekrooster",
+        "description": "ALLEEN gebruiken in uitzonderlijke gevallen! Verwijdert het bestaande rooster voor deze week en genereert een nieuw rooster.",
+        "responses": {
+          "200": {
+            "description": "Rooster opnieuw gegenereerd",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "schedule": { "type": "object" }
                   }
                 }
               }
