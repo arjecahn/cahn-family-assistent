@@ -90,7 +90,7 @@
       "post": {
         "operationId": "completeTask",
         "summary": "Registreer dat iemand een taak heeft gedaan",
-        "description": "BELANGRIJK: Elk gezinslid kan ELKE taak voltooien, ongeacht het rooster. Het rooster is slechts een suggestie - als iemand een andere taak heeft gedaan dan gepland, registreer dan gewoon wat er daadwerkelijk is gedaan. Bij meerdere taken: roep deze endpoint meerdere keren aan, één keer per taak per persoon.",
+        "description": "Elk gezinslid kan ELKE taak voltooien, ongeacht het rooster. Registreer wat er daadwerkelijk is gedaan. Bij meerdere taken: roep meerdere keren aan.",
         "requestBody": {
           "required": true,
           "content": {
