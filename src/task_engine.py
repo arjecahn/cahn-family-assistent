@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 from dataclasses import dataclass
 
-from .models import Member, Task, Completion, ScheduleAssignment
+from .models import Member, Task, Completion, ScheduleAssignment, MissedTask
 from . import database as db
 from .database import now_local, today_local, TIMEZONE
 
@@ -956,11 +956,27 @@ class TaskEngine:
         # Tel taken per persoon (gebaseerd op assignments + completions)
         member_week_counts = self._count_member_tasks(schedule, members)
 
-        # Genereer ASCII/emoji overzicht (met month_completions voor stats)
+        # Haal verzaakte taken op voor deze week
+        missed_tasks = db.get_missed_tasks_for_week(week_number, year)
+
+        # Genereer ASCII/emoji overzicht (met month_completions en missed_tasks)
         ascii_overview = self._generate_ascii_schedule(
             schedule, week_start, day_availability, member_week_counts,
-            members=members, tasks=tasks, month_completions=month_completions
+            members=members, tasks=tasks, month_completions=month_completions,
+            missed_tasks=missed_tasks
         )
+
+        # Format missed tasks voor response
+        missed_tasks_formatted = [
+            {
+                "member_name": mt.member_name,
+                "task_name": mt.task_name,
+                "original_day": DAY_NAMES[mt.original_day],
+                "rescheduled_to": DAY_NAMES[mt.rescheduled_to_day] if mt.rescheduled_to_day is not None else None,
+                "expired": mt.expired
+            }
+            for mt in missed_tasks
+        ]
 
         return {
             "week_number": week_number,
@@ -968,7 +984,8 @@ class TaskEngine:
             "schedule": schedule,
             "ascii_overview": ascii_overview,
             "member_totals": member_week_counts,
-            "day_availability": {day: [m.name for m in members] for day, members in day_availability.items()}
+            "day_availability": {day: [m.name for m in members] for day, members in day_availability.items()},
+            "missed_tasks": missed_tasks_formatted
         }
 
     def _calculate_day_availability(self, members: list, week_start: date, week_absences: list) -> dict:
@@ -1189,6 +1206,22 @@ class TaskEngine:
                         except Exception:
                             pass  # Assignment bestaat mogelijk al
 
+                        # Registreer verzaakte taak (met herplanning info)
+                        try:
+                            db.add_missed_task(
+                                week_number=week_number,
+                                year=year,
+                                original_day=original_day_idx,
+                                task_id=task.id,
+                                task_name=task_name,
+                                member_id=member.id,
+                                member_name=member.name,
+                                rescheduled_to_day=target_day_idx,
+                                expired=False
+                            )
+                        except Exception:
+                            pass  # Mogelijk al geregistreerd
+
                     rescheduled = True
                     break
 
@@ -1200,13 +1233,29 @@ class TaskEngine:
                     if not (t["task_name"] == task_name and t.get("missed"))
                 ]
                 # Verwijder ook uit database
-                if task:
+                member = next((m for m in members if m.name == original_member), None)
+                if task and member:
                     db.delete_assignment_for_task(
                         week_number=week_number,
                         year=year,
                         day_of_week=original_day_idx,
                         task_id=task.id
                     )
+                    # Registreer als vervallen taak
+                    try:
+                        db.add_missed_task(
+                            week_number=week_number,
+                            year=year,
+                            original_day=original_day_idx,
+                            task_id=task.id,
+                            task_name=task_name,
+                            member_id=member.id,
+                            member_name=member.name,
+                            rescheduled_to_day=None,
+                            expired=True
+                        )
+                    except Exception:
+                        pass  # Mogelijk al geregistreerd
 
         # Sorteer taken per dag op time_of_day
         time_order = {"ochtend": 0, "middag": 1, "avond": 2}
@@ -1630,7 +1679,8 @@ class TaskEngine:
     def _generate_ascii_schedule(self, schedule: dict, week_start: date,
                                    day_availability: dict, member_totals: dict,
                                    members: list = None, tasks: list = None,
-                                   month_completions: list = None) -> str:
+                                   month_completions: list = None,
+                                   missed_tasks: list = None) -> str:
         """Genereer een ASCII/emoji weekoverzicht."""
         lines = []
 
@@ -1688,6 +1738,22 @@ class TaskEngine:
 
             if day_idx < 6:
                 lines.append("║───────────────────────────────────────────────────║")
+
+        # Verzaakte taken sectie (indien aanwezig)
+        if missed_tasks:
+            lines.append("╠═══════════════════════════════════════════════════╣")
+            lines.append("║  ⚠️  VERZAAKTE TAKEN DEZE WEEK                     ║")
+            lines.append("║───────────────────────────────────────────────────║")
+            for mt in missed_tasks:
+                original_day = DAY_NAMES[mt.original_day][:3]
+                if mt.expired:
+                    status = "❌ vervallen"
+                    line = f"{mt.member_name[:6]}: {mt.task_name[:18]} ({original_day}) {status}"
+                else:
+                    new_day = DAY_NAMES[mt.rescheduled_to_day][:3] if mt.rescheduled_to_day is not None else "?"
+                    status = f"→ {new_day}"
+                    line = f"{mt.member_name[:6]}: {mt.task_name[:18]} ({original_day}) {status}"
+                lines.append(f"║    {line:<46}║")
 
         # Maandoverzicht per taak per persoon
         lines.append("╠═══════════════════════════════════════════════════╣")

@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from .models import Member, Task, Completion, Absence, Swap, ScheduleAssignment
+from .models import Member, Task, Completion, Absence, Swap, ScheduleAssignment, MissedTask
 
 # Timezone voor de familie (Nederland)
 TIMEZONE = ZoneInfo("Europe/Amsterdam")
@@ -133,6 +133,24 @@ def init_db():
             member_name VARCHAR(50),
             created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(week_number, year, day_of_week, task_id)
+        )
+    """)
+
+    # Missed tasks - bijhouden wie welke taak heeft verzaakt
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS missed_tasks (
+            id SERIAL PRIMARY KEY,
+            week_number INTEGER NOT NULL,
+            year INTEGER NOT NULL,
+            original_day INTEGER NOT NULL,
+            task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+            task_name VARCHAR(100),
+            member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+            member_name VARCHAR(50),
+            rescheduled_to_day INTEGER,
+            expired BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(week_number, year, original_day, task_id, member_id)
         )
     """)
 
@@ -1182,3 +1200,138 @@ def migrate_add_schedule_table():
     finally:
         cur.close()
         conn.close()
+
+
+def migrate_add_missed_tasks_table():
+    """Migratie: voeg missed_tasks tabel toe aan bestaande database."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS missed_tasks (
+                id SERIAL PRIMARY KEY,
+                week_number INTEGER NOT NULL,
+                year INTEGER NOT NULL,
+                original_day INTEGER NOT NULL,
+                task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+                task_name VARCHAR(100),
+                member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+                member_name VARCHAR(50),
+                rescheduled_to_day INTEGER,
+                expired BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(week_number, year, original_day, task_id, member_id)
+            )
+        """)
+        conn.commit()
+        print("missed_tasks tabel aangemaakt!")
+
+    except Exception as e:
+        conn.rollback()
+        print(f"Migratie fout: {e}")
+        raise e
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+# CRUD operaties voor MissedTasks
+def add_missed_task(week_number: int, year: int, original_day: int, task_id: str,
+                    task_name: str, member_id: str, member_name: str,
+                    rescheduled_to_day: int = None, expired: bool = False) -> MissedTask:
+    """Registreer een verzaakte taak."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            INSERT INTO missed_tasks
+                (week_number, year, original_day, task_id, task_name, member_id, member_name, rescheduled_to_day, expired)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (week_number, year, original_day, task_id, member_id)
+            DO UPDATE SET rescheduled_to_day = EXCLUDED.rescheduled_to_day, expired = EXCLUDED.expired
+            RETURNING id, created_at
+        """, (week_number, year, original_day, int(task_id), task_name,
+              int(member_id), member_name, rescheduled_to_day, expired))
+        row = cur.fetchone()
+        conn.commit()
+
+        return MissedTask(
+            id=str(row["id"]),
+            week_number=week_number,
+            year=year,
+            original_day=original_day,
+            task_id=str(task_id),
+            task_name=task_name,
+            member_id=str(member_id),
+            member_name=member_name,
+            rescheduled_to_day=rescheduled_to_day,
+            expired=expired,
+            created_at=row["created_at"]
+        )
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_missed_tasks_for_week(week_number: int, year: int) -> list[MissedTask]:
+    """Haal alle verzaakte taken op voor een week."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, week_number, year, original_day, task_id, task_name,
+               member_id, member_name, rescheduled_to_day, expired, created_at
+        FROM missed_tasks
+        WHERE week_number = %s AND year = %s
+        ORDER BY original_day, task_name
+    """, (week_number, year))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return [MissedTask(
+        id=str(r["id"]),
+        week_number=r["week_number"],
+        year=r["year"],
+        original_day=r["original_day"],
+        task_id=str(r["task_id"]),
+        task_name=r["task_name"],
+        member_id=str(r["member_id"]),
+        member_name=r["member_name"],
+        rescheduled_to_day=r["rescheduled_to_day"],
+        expired=r["expired"],
+        created_at=r["created_at"]
+    ) for r in rows]
+
+
+def get_missed_tasks_for_member(member_id: str, limit: int = 20) -> list[MissedTask]:
+    """Haal verzaakte taken op voor een specifiek gezinslid (historisch overzicht)."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, week_number, year, original_day, task_id, task_name,
+               member_id, member_name, rescheduled_to_day, expired, created_at
+        FROM missed_tasks
+        WHERE member_id = %s
+        ORDER BY created_at DESC
+        LIMIT %s
+    """, (int(member_id), limit))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return [MissedTask(
+        id=str(r["id"]),
+        week_number=r["week_number"],
+        year=r["year"],
+        original_day=r["original_day"],
+        task_id=str(r["task_id"]),
+        task_name=r["task_name"],
+        member_id=str(r["member_id"]),
+        member_name=r["member_name"],
+        rescheduled_to_day=r["rescheduled_to_day"],
+        expired=r["expired"],
+        created_at=r["created_at"]
+    ) for r in rows]

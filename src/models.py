@@ -72,3 +72,18 @@ class ScheduleAssignment(BaseModel):
     member_id: str
     member_name: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class MissedTask(BaseModel):
+    """Verzaakte taak - voor historisch bijhouden wie wat heeft gemist."""
+    id: str
+    week_number: int
+    year: int
+    original_day: int  # 0=maandag, 6=zondag - de dag waarop de taak gepland stond
+    task_id: str
+    task_name: str
+    member_id: str
+    member_name: str
+    rescheduled_to_day: Optional[int] = None  # Naar welke dag herplant (None = vervallen)
+    expired: bool = False  # True als taak niet herplant kon worden
+    created_at: datetime = Field(default_factory=datetime.utcnow)

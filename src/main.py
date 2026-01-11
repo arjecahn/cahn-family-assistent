@@ -10,7 +10,8 @@ from .task_engine import engine
 from .database import (
     seed_initial_data, reset_tasks_2026, update_task_targets, get_all_tasks,
     get_member_by_name, get_last_completion_for_member, delete_completion,
-    migrate_add_cascade_delete, migrate_add_schedule_table
+    migrate_add_cascade_delete, migrate_add_schedule_table, migrate_add_missed_tasks_table,
+    get_missed_tasks_for_week, get_missed_tasks_for_member
 )
 from .voice_handlers import handle_google_action
 
@@ -94,6 +95,20 @@ async def run_schedule_table_migration():
     try:
         migrate_add_schedule_table()
         return {"status": "ok", "message": "schedule_assignments tabel aangemaakt"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/migrate/missed-tasks-table")
+async def run_missed_tasks_table_migration():
+    """Voer migratie uit om missed_tasks tabel toe te voegen.
+
+    Dit is nodig voor het bijhouden van verzaakte taken.
+    Veilig om meerdere keren uit te voeren.
+    """
+    try:
+        migrate_add_missed_tasks_table()
+        return {"status": "ok", "message": "missed_tasks tabel aangemaakt"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -445,6 +460,32 @@ async def get_pending_swaps(member_name: str):
             "date": s.swap_date
         }
         for s in swaps
+    ]
+
+
+# === Verzaakte Taken ===
+
+@app.get("/api/missed/{member_name}")
+async def get_missed_tasks_for_person(member_name: str, limit: int = 20):
+    """Haal verzaakte taken op voor een specifiek gezinslid.
+
+    Dit toont een historisch overzicht van taken die niet zijn gedaan.
+    Inclusief of ze zijn herplant of vervallen.
+    """
+    member = get_member_by_name(member_name)
+    if not member:
+        raise HTTPException(status_code=404, detail=f"Gezinslid '{member_name}' niet gevonden")
+
+    missed = get_missed_tasks_for_member(member.id, limit)
+    return [
+        {
+            "week": f"Week {m.week_number}, {m.year}",
+            "original_day": ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"][m.original_day],
+            "task": m.task_name,
+            "status": "vervallen" if m.expired else f"herplant naar {['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'][m.rescheduled_to_day]}" if m.rescheduled_to_day is not None else "onbekend",
+            "date": m.created_at.isoformat()
+        }
+        for m in missed
     ]
 
 
