@@ -421,16 +421,45 @@ def get_all_tasks() -> list[Task]:
 
 
 def get_task_by_name(name: str) -> Optional[Task]:
-    """Zoek een taak op naam of display_name."""
+    """Zoek een taak op naam of display_name.
+
+    Matching prioriteit:
+    1. Exacte match op name of display_name
+    2. "uitruimen" zonder specificatie → "uitruimen avond" (meest voorkomend)
+    3. LIKE match op display_name
+    """
     conn = get_db()
     cur = conn.cursor()
+
+    # Normaliseer input
+    name_lower = name.lower().strip()
+
+    # Speciale case: "uitruimen" zonder "ochtend"/"avond" → default naar avond
+    if name_lower in ("uitruimen", "uitgeruimd"):
+        name_lower = "uitruimen_avond"
+
+    # Probeer eerst exacte match
     cur.execute("""
-        SELECT id, name, display_name, description, weekly_target, per_child_target, rotation_weeks, time_of_day FROM tasks
-        WHERE LOWER(name) = LOWER(%s) OR LOWER(display_name) LIKE LOWER(%s)
-    """, (name, f"%{name}%"))
+        SELECT id, name, display_name, description, weekly_target, per_child_target, rotation_weeks, time_of_day
+        FROM tasks
+        WHERE LOWER(name) = %s OR LOWER(display_name) = %s
+    """, (name_lower, name_lower))
     row = cur.fetchone()
+
+    # Als geen exacte match, probeer LIKE (maar prefereer kortere matches)
+    if not row:
+        cur.execute("""
+            SELECT id, name, display_name, description, weekly_target, per_child_target, rotation_weeks, time_of_day
+            FROM tasks
+            WHERE LOWER(display_name) LIKE %s
+            ORDER BY LENGTH(display_name) ASC
+            LIMIT 1
+        """, (f"%{name_lower}%",))
+        row = cur.fetchone()
+
     cur.close()
     conn.close()
+
     if row:
         return Task(
             id=str(row["id"]),
