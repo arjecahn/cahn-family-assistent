@@ -10,6 +10,10 @@ from . import database as db
 DAY_NAMES = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"]
 DAY_EMOJIS = ["🌙", "🔥", "💧", "⚡", "🌸", "🌟", "☀️"]
 
+# Maand namen in het Nederlands
+MONTH_NAMES = ["", "januari", "februari", "maart", "april", "mei", "juni",
+               "juli", "augustus", "september", "oktober", "november", "december"]
+
 
 @dataclass
 class MemberScore:
@@ -522,16 +526,66 @@ class TaskEngine:
             if day_idx < 6:
                 lines.append("║───────────────────────────────────────────────────║")
 
-        # Totaal overzicht
+        # Maandoverzicht per taak per persoon
         lines.append("╠═══════════════════════════════════════════════════╣")
-        lines.append("║  📊 STAND DEZE WEEK                               ║")
-        for name, count in sorted(member_totals.items()):
-            bar = "█" * min(count, 20)
-            lines.append(f"║    {name:<6}: {bar:<20} ({count})           ║")
+        month_stats = self._get_monthly_task_stats()
+        month_name = MONTH_NAMES[today.month].upper()
+        lines.append(f"║  📊 STAND {month_name:<38}║")
+        lines.append("║                    Nora  Linde Fenna              ║")
+        lines.append("║───────────────────────────────────────────────────║")
+
+        for task_name, stats in month_stats.items():
+            # Kort de taaknaam af indien nodig
+            short_name = task_name[:14]
+            nora = f"{stats['Nora']['done']}/{stats['Nora']['target']}"
+            linde = f"{stats['Linde']['done']}/{stats['Linde']['target']}"
+            fenna = f"{stats['Fenna']['done']}/{stats['Fenna']['target']}"
+            lines.append(f"║  {short_name:<16} {nora:>5} {linde:>5} {fenna:>5}              ║")
 
         lines.append("╚═══════════════════════════════════════════════════╝")
 
         return "\n".join(lines)
+
+    def _get_monthly_task_stats(self) -> dict:
+        """Bereken per taak hoeveel elke persoon heeft gedaan deze maand."""
+        import calendar
+
+        today = date.today()
+        year = today.year
+        month = today.month
+
+        # Hoeveel weken zitten er in deze maand (voor targets)
+        _, days_in_month = calendar.monthrange(year, month)
+        weeks_in_month = days_in_month / 7
+
+        # Haal alle completions voor deze maand op
+        completions = db.get_completions_for_month(year, month)
+
+        # Haal alle taken en leden op
+        tasks = db.get_all_tasks()
+        members = db.get_all_members()
+        member_names = [m.name for m in members]
+
+        # Bouw de stats op
+        stats = {}
+        for task in tasks:
+            # Maandelijks target per persoon = weekly_target * weken / 3 personen
+            monthly_target_per_person = round(task.weekly_target * weeks_in_month / len(members))
+            # Minimum 1 als er überhaupt een target is
+            if task.weekly_target > 0 and monthly_target_per_person == 0:
+                monthly_target_per_person = 1
+
+            stats[task.display_name] = {}
+            for name in member_names:
+                # Tel hoeveel deze persoon deze taak heeft gedaan
+                done = sum(1 for c in completions
+                          if c.member_name == name and c.task_id == task.id)
+                stats[task.display_name][name] = {
+                    "done": done,
+                    "target": monthly_target_per_person
+                }
+
+        return stats
 
 
 # Singleton instance

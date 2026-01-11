@@ -363,6 +363,24 @@ def get_completions_for_member(member_id: str, week_number: int) -> list[Complet
                        completed_at=r["completed_at"], week_number=r["week_number"]) for r in rows]
 
 
+def get_completions_for_month(year: int, month: int) -> list[Completion]:
+    """Haal alle voltooide taken op voor een specifieke maand."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, task_id, member_id, member_name, task_name, completed_at, week_number
+        FROM completions
+        WHERE EXTRACT(YEAR FROM completed_at) = %s
+          AND EXTRACT(MONTH FROM completed_at) = %s
+    """, (year, month))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [Completion(id=str(r["id"]), task_id=str(r["task_id"]), member_id=str(r["member_id"]),
+                       member_name=r["member_name"], task_name=r["task_name"],
+                       completed_at=r["completed_at"], week_number=r["week_number"]) for r in rows]
+
+
 def add_completion(completion_data: dict) -> Completion:
     """Voeg een voltooide taak toe."""
     conn = get_db()
