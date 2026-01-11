@@ -150,7 +150,8 @@
                       "type": "object",
                       "properties": {
                         "member_name": { "type": "string", "description": "Naam: Nora, Linde of Fenna" },
-                        "task_name": { "type": "string", "description": "Taak die deze persoon deed" }
+                        "task_name": { "type": "string", "description": "Taak die deze persoon deed" },
+                        "completed_date": { "type": "string", "format": "date", "description": "Datum (YYYY-MM-DD), optioneel. Bijv: 2026-01-06 voor maandag" }
                       },
                       "required": ["member_name", "task_name"]
                     }

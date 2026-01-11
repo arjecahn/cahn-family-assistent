@@ -385,6 +385,15 @@ def add_completion(completion_data: dict) -> Completion:
     """Voeg een voltooide taak toe."""
     conn = get_db()
     cur = conn.cursor()
+
+    # Gebruik opgegeven datum of huidige tijd
+    completed_date = completion_data.get("completed_date")
+    if completed_date:
+        # Zet date om naar datetime (middag van die dag)
+        completed_at = datetime.combine(completed_date, datetime.min.time().replace(hour=12))
+    else:
+        completed_at = datetime.utcnow()
+
     cur.execute("""
         INSERT INTO completions (task_id, member_id, member_name, task_name, week_number, completed_at)
         VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
@@ -394,13 +403,16 @@ def add_completion(completion_data: dict) -> Completion:
         completion_data["member_name"],
         completion_data["task_name"],
         completion_data["week_number"],
-        datetime.utcnow()
+        completed_at
     ))
     new_id = cur.fetchone()["id"]
     conn.commit()
     cur.close()
     conn.close()
-    return Completion(id=str(new_id), completed_at=datetime.utcnow(), **completion_data)
+
+    # Maak return object (zonder completed_date veld dat niet in model zit)
+    return_data = {k: v for k, v in completion_data.items() if k != "completed_date"}
+    return Completion(id=str(new_id), completed_at=completed_at, **return_data)
 
 
 def get_last_completion_for_task(member_id: str, task_id: str) -> Optional[Completion]:

@@ -121,6 +121,7 @@ class TaskCompletionRequest(BaseModel):
 class BulkCompletionItem(BaseModel):
     member_name: str
     task_name: str
+    completed_date: Optional[date] = None  # Optioneel: datum waarop taak is gedaan
 
 
 class BulkCompletionRequest(BaseModel):
@@ -191,16 +192,22 @@ async def complete_tasks_bulk(request: BulkCompletionRequest):
 
     Gebruik dit als meerdere kinderen taken hebben gedaan.
     Elke completion bevat expliciet welk kind welke taak heeft gedaan.
+    Optioneel kan per taak een datum worden meegegeven.
     """
     results = []
     errors = []
 
     for item in request.completions:
         try:
-            completion = engine.complete_task(item.member_name, item.task_name)
+            completion = engine.complete_task(
+                item.member_name,
+                item.task_name,
+                item.completed_date
+            )
             results.append({
                 "member_name": item.member_name,
                 "task_name": item.task_name,
+                "completed_date": item.completed_date.isoformat() if item.completed_date else None,
                 "success": True,
                 "completion_id": completion.id
             })

@@ -172,8 +172,14 @@ class TaskEngine:
         else:
             return f"{name} is het langst geleden dat die {task.display_name} heeft gedaan."
 
-    def complete_task(self, member_name: str, task_name: str) -> Completion:
-        """Registreer dat iemand een taak heeft voltooid."""
+    def complete_task(self, member_name: str, task_name: str, completed_date: Optional[date] = None) -> Completion:
+        """Registreer dat iemand een taak heeft voltooid.
+
+        Args:
+            member_name: Naam van het gezinslid
+            task_name: Naam van de taak
+            completed_date: Optioneel - datum waarop de taak is gedaan (default: vandaag)
+        """
         member = db.get_member_by_name(member_name)
         if not member:
             raise ValueError(f"Gezinslid '{member_name}' niet gevonden")
@@ -182,12 +188,19 @@ class TaskEngine:
         if not task:
             raise ValueError(f"Taak '{task_name}' niet gevonden")
 
+        # Bepaal week nummer voor de completion date
+        if completed_date:
+            week_number = completed_date.isocalendar()[1]
+        else:
+            week_number = self.get_current_week()
+
         completion = db.add_completion({
             "task_id": task.id,
             "member_id": member.id,
             "member_name": member.name,
             "task_name": task.display_name,
-            "week_number": self.get_current_week()
+            "week_number": week_number,
+            "completed_date": completed_date
         })
 
         return completion
