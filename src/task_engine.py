@@ -1096,16 +1096,18 @@ class TaskEngine:
             if not task:
                 continue
 
-            # Check of deze taak al herplant is (al een toekomstige ⬜ assignment heeft)
+            # Check of deze taak al herplant is naar een toekomstige dag
+            # Dit voorkomt dubbele herplanning bij herhaalde API calls
             already_rescheduled = False
             for future_day_idx in range(max(0, today_idx), 7):
                 future_day_name = DAY_NAMES[future_day_idx]
                 for future_task in schedule[future_day_name]["tasks"]:
+                    # Als dezelfde taak + persoon al op een toekomstige dag staat
+                    # (en niet gemist/voltooid), dan is het al herplant
                     if (future_task["task_name"] == task_name and
                         future_task.get("assigned_to") == original_member and
                         not future_task.get("completed") and
-                        not future_task.get("missed") and
-                        future_task.get("rescheduled_from") is not None):
+                        not future_task.get("missed")):
                         already_rescheduled = True
                         break
                 if already_rescheduled:
@@ -1116,6 +1118,8 @@ class TaskEngine:
 
             # Zoek een geschikte dag om te herplannen (vandaag of later)
             rescheduled = False
+            original_day_idx = missed["original_day"]
+
             for target_day_idx in range(max(0, today_idx), 7):
                 target_day_name = DAY_NAMES[target_day_idx]
                 available = day_availability.get(target_day_name, [])
@@ -1129,7 +1133,14 @@ class TaskEngine:
                 slot_free = time_slot not in member_day_slots[target_day_idx].get(original_member, set())
 
                 if member_available and slot_free:
-                    # Herplan naar deze dag
+                    # Herplan naar deze dag - VERWIJDER originele uit schedule
+                    original_day_name = DAY_NAMES[original_day_idx]
+                    schedule[original_day_name]["tasks"] = [
+                        t for t in schedule[original_day_name]["tasks"]
+                        if not (t["task_name"] == task_name and t.get("missed"))
+                    ]
+
+                    # Voeg toe aan nieuwe dag
                     schedule[target_day_name]["tasks"].append({
                         "task_name": task_name,
                         "assigned_to": original_member,
@@ -1138,7 +1149,7 @@ class TaskEngine:
                         "time_of_day": time_slot,
                         "extra": False,
                         "missed": False,
-                        "rescheduled_from": missed["original_day"]  # Track waar het vandaan komt
+                        "rescheduled_from": original_day_idx  # Track waar het vandaan komt
                     })
 
                     # Update tijdslot tracking - check of taak meerdere slots blokkeert
@@ -1154,9 +1165,17 @@ class TaskEngine:
                     # Update dag totaal
                     day_task_totals[target_day_idx] += 1
 
-                    # Sla ook op in database
+                    # Update database: verwijder oude assignment, voeg nieuwe toe
                     member = next((m for m in members if m.name == original_member), None)
                     if member:
+                        # Verwijder de oude assignment
+                        db.delete_assignment_for_task(
+                            week_number=week_number,
+                            year=year,
+                            day_of_week=original_day_idx,
+                            task_id=task.id
+                        )
+                        # Voeg nieuwe toe
                         try:
                             db.add_assignment(
                                 week_number=week_number,
@@ -1173,12 +1192,21 @@ class TaskEngine:
                     rescheduled = True
                     break
 
-            # Als niet herplant kon worden voor originele persoon, LAAT VERVALLEN
-            # (gemiste taken die niet kunnen worden herplant door de regels komen te vervallen)
+            # Als niet herplant kon worden: VERWIJDER uit schedule en database (vervalt)
             if not rescheduled:
-                # Taak kan niet worden herplant - markeer als definitief gemist
-                # Door niets te doen, blijft de taak alleen zichtbaar als ❌ op de originele dag
-                pass
+                original_day_name = DAY_NAMES[original_day_idx]
+                schedule[original_day_name]["tasks"] = [
+                    t for t in schedule[original_day_name]["tasks"]
+                    if not (t["task_name"] == task_name and t.get("missed"))
+                ]
+                # Verwijder ook uit database
+                if task:
+                    db.delete_assignment_for_task(
+                        week_number=week_number,
+                        year=year,
+                        day_of_week=original_day_idx,
+                        task_id=task.id
+                    )
 
         # Sorteer taken per dag op time_of_day
         time_order = {"ochtend": 0, "middag": 1, "avond": 2}

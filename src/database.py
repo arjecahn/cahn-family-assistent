@@ -1008,6 +1008,24 @@ def get_member_assignments_for_day(member_id: str, week_number: int, year: int, 
     ) for r in rows]
 
 
+def delete_assignment_for_task(week_number: int, year: int, day_of_week: int, task_id: str) -> bool:
+    """Verwijder een assignment voor een specifieke taak op een specifieke dag.
+
+    Gebruikt voor herplanning: verwijder oude assignment voordat nieuwe wordt toegevoegd.
+    """
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        DELETE FROM schedule_assignments
+        WHERE week_number = %s AND year = %s AND day_of_week = %s AND task_id = %s
+    """, (week_number, year, day_of_week, int(task_id)))
+    deleted = cur.rowcount > 0
+    conn.commit()
+    cur.close()
+    conn.close()
+    return deleted
+
+
 def add_assignment(week_number: int, year: int, day_of_week: int, task_id: str, task_name: str, member_id: str, member_name: str) -> ScheduleAssignment:
     """Voeg een nieuwe assignment toe (voor herplanning)."""
     conn = get_db()
