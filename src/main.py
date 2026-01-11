@@ -51,8 +51,18 @@ async def startup():
 # Health check
 @app.get("/health")
 async def health():
-    """Health check endpoint voor Cloud Run."""
+    """Health check endpoint."""
     return {"status": "healthy"}
+
+
+@app.get("/api/init")
+async def init_database():
+    """Initialiseer de database (eenmalig aanroepen)."""
+    try:
+        seed_initial_data()
+        return {"status": "ok", "message": "Database geinitialiseerd"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 # === API Endpoints ===
