@@ -483,6 +483,38 @@ def get_absence_for_date(member_id: str, check_date: date) -> Optional[Absence]:
     return None
 
 
+def get_absences_for_week(week_start: date, week_end: date) -> list[Absence]:
+    """Haal alle afwezigheden op die overlappen met een week (batch query)."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, member_id, member_name, start_date, end_date, reason
+        FROM absences
+        WHERE start_date <= %s AND end_date >= %s
+    """, (week_end, week_start))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [Absence(id=str(r["id"]), member_id=str(r["member_id"]), member_name=r["member_name"],
+                   start_date=r["start_date"], end_date=r["end_date"], reason=r["reason"]) for r in rows]
+
+
+def get_completions_for_week(week_number: int) -> list[Completion]:
+    """Haal alle voltooide taken op voor een week (batch query)."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, task_id, member_id, member_name, task_name, completed_at, week_number
+        FROM completions WHERE week_number = %s
+    """, (week_number,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [Completion(id=str(r["id"]), task_id=str(r["task_id"]), member_id=str(r["member_id"]),
+                       member_name=r["member_name"], task_name=r["task_name"],
+                       completed_at=r["completed_at"], week_number=r["week_number"]) for r in rows]
+
+
 def add_absence(absence_data: dict) -> Absence:
     """Registreer afwezigheid."""
     conn = get_db()

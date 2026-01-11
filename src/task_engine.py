@@ -305,14 +305,13 @@ class TaskEngine:
         """
         week_number = self.get_current_week()
         week_start = self.get_week_start(week_number)
+        week_end = week_start + timedelta(days=6)
+
+        # === BATCH QUERIES: Alles in 4 queries ipv 30+ ===
         members = db.get_all_members()
         tasks = db.get_all_tasks()
-
-        # Haal alle completions voor deze week op
-        all_completions = []
-        for member in members:
-            completions = db.get_completions_for_member(member.id, week_number)
-            all_completions.extend(completions)
+        all_completions = db.get_completions_for_week(week_number)
+        week_absences = db.get_absences_for_week(week_start, week_end)
 
         # Bouw het schema per dag
         schedule = {}
@@ -325,12 +324,20 @@ class TaskEngine:
                 "tasks": []
             }
 
-        # Bepaal per dag wie beschikbaar is (rekening houdend met afwezigheden)
+        # Bepaal per dag wie beschikbaar is (in-memory lookup, geen DB calls)
         day_availability = {}
         for day_idx in range(7):
             day_date = week_start + timedelta(days=day_idx)
             day_name = DAY_NAMES[day_idx]
-            available = [m for m in members if self.is_member_available(m, day_date)]
+            available = []
+            for m in members:
+                # Check of er een afwezigheid is die deze dag overlapt
+                is_absent = any(
+                    a.member_id == m.id and a.start_date <= day_date <= a.end_date
+                    for a in week_absences
+                )
+                if not is_absent:
+                    available.append(m)
             day_availability[day_name] = available
 
         # Track hoeveel taken per persoon per week (inclusief al gedane taken)
@@ -398,8 +405,11 @@ class TaskEngine:
             daily_assignments[day_name].sort(key=lambda t: time_order.get(t["time_of_day"], 1))
             schedule[day_name]["tasks"] = daily_assignments[day_name]
 
-        # Genereer ASCII/emoji overzicht
-        ascii_overview = self._generate_ascii_schedule(schedule, week_start, day_availability, member_week_counts)
+        # Genereer ASCII/emoji overzicht (geef members en tasks mee om queries te besparen)
+        ascii_overview = self._generate_ascii_schedule(
+            schedule, week_start, day_availability, member_week_counts,
+            members=members, tasks=tasks
+        )
 
         return {
             "week_number": week_number,
@@ -488,7 +498,8 @@ class TaskEngine:
         return task_days
 
     def _generate_ascii_schedule(self, schedule: dict, week_start: date,
-                                   day_availability: dict, member_totals: dict) -> str:
+                                   day_availability: dict, member_totals: dict,
+                                   members: list = None, tasks: list = None) -> str:
         """Genereer een ASCII/emoji weekoverzicht."""
         lines = []
 
@@ -499,7 +510,8 @@ class TaskEngine:
         lines.append("╠═══════════════════════════════════════════════════╣")
 
         today = date.today()
-        all_members = db.get_all_members()
+        # Gebruik meegegeven members of haal ze op (fallback)
+        all_members = members if members else db.get_all_members()
 
         for day_idx, day_name in enumerate(DAY_NAMES):
             day_data = schedule[day_name]
@@ -541,7 +553,7 @@ class TaskEngine:
 
         # Maandoverzicht per taak per persoon
         lines.append("╠═══════════════════════════════════════════════════╣")
-        month_stats = self._get_monthly_task_stats()
+        month_stats = self._get_monthly_task_stats(members=all_members, tasks=tasks)
         month_name = MONTH_NAMES[today.month].upper()
         lines.append(f"║  📊 STAND {month_name:<38}║")
         lines.append("║                    Nora  Linde Fenna              ║")
@@ -559,7 +571,7 @@ class TaskEngine:
 
         return "\n".join(lines)
 
-    def _get_monthly_task_stats(self) -> dict:
+    def _get_monthly_task_stats(self, members: list = None, tasks: list = None) -> dict:
         """Bereken per taak hoeveel elke persoon heeft gedaan deze maand."""
         import calendar
 
@@ -571,12 +583,14 @@ class TaskEngine:
         _, days_in_month = calendar.monthrange(year, month)
         weeks_in_month = days_in_month / 7
 
-        # Haal alle completions voor deze maand op
+        # Haal alle completions voor deze maand op (1 query)
         completions = db.get_completions_for_month(year, month)
 
-        # Haal alle taken en leden op
-        tasks = db.get_all_tasks()
-        members = db.get_all_members()
+        # Gebruik meegegeven data of haal op (fallback)
+        if tasks is None:
+            tasks = db.get_all_tasks()
+        if members is None:
+            members = db.get_all_members()
         member_names = [m.name for m in members]
 
         # Bouw de stats op
