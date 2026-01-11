@@ -26,6 +26,9 @@ TASK_MIN_SPACING = {
     "glas": 5,
 }
 
+# Maximum aantal taken per dag (harde limiet)
+MAX_TASKS_PER_DAY = 5
+
 # Dag namen in het Nederlands
 DAY_NAMES = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"]
 DAY_EMOJIS = ["🌙", "🔥", "💧", "⚡", "🌸", "🌟", "☀️"]
@@ -1041,8 +1044,22 @@ class TaskEngine:
                     if not task_info.get("missed"):
                         task_scheduled_days[t_name].append(day_idx)
 
+        # Track aantal taken per dag (voor max limiet)
+        day_task_totals = {day_idx: 0 for day_idx in range(7)}
+        for day_idx in range(7):
+            day_name = DAY_NAMES[day_idx]
+            # Tel alleen niet-gemiste taken
+            day_task_totals[day_idx] = sum(
+                1 for t in schedule[day_name]["tasks"]
+                if not t.get("missed")
+            )
+
         def is_valid_day_for_task(task_name: str, target_day_idx: int, task: Task) -> bool:
             """Check of een dag geschikt is voor een taak."""
+            # Regel 0: Max taken per dag limiet
+            if day_task_totals[target_day_idx] >= MAX_TASKS_PER_DAY:
+                return False
+
             # Regel 1: Weekday-only taken niet op weekend (zaterdag=5, zondag=6)
             if task.name in WEEKDAY_ONLY_TASKS or task_name in WEEKDAY_ONLY_TASKS:
                 if target_day_idx >= 5:  # Weekend
@@ -1119,6 +1136,8 @@ class TaskEngine:
                     if task_name not in task_scheduled_days:
                         task_scheduled_days[task_name] = []
                     task_scheduled_days[task_name].append(target_day_idx)
+                    # Update dag totaal
+                    day_task_totals[target_day_idx] += 1
 
                     # Sla ook op in database
                     member = next((m for m in members if m.name == original_member), None)
@@ -1455,6 +1474,10 @@ class TaskEngine:
                 if task.name in WEEKDAY_ONLY_TASKS:
                     if day_idx >= 5:  # Weekend (zaterdag=5, zondag=6)
                         continue
+
+                # Check max taken per dag limiet
+                if day_task_count[day_idx] >= MAX_TASKS_PER_DAY:
+                    continue  # Dag zit al vol
 
                 suitable_days.append(day_idx)
 
