@@ -15,6 +15,17 @@ TIME_SLOT_GROUPS = {
     "ochtend": ["uitruimen_ochtend"]
 }
 
+# Taken die alleen op doordeweekse dagen kunnen (voor school)
+WEEKDAY_ONLY_TASKS = {"uitruimen_ochtend", "uitruimen voor school"}
+
+# Minimale dagen tussen herhalingen van een taak (voor spreiding)
+# bijv. karton_papier: 2 betekent minstens 2 dagen ertussen
+TASK_MIN_SPACING = {
+    "karton_papier": 2,
+    "karton/papier": 2,
+    "glas": 5,
+}
+
 # Dag namen in het Nederlands
 DAY_NAMES = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"]
 DAY_EMOJIS = ["🌙", "🔥", "💧", "⚡", "🌸", "🌟", "☀️"]
@@ -978,6 +989,11 @@ class TaskEngine:
         1. Op de originele dag getoond met ❌ (doorgestreept)
         2. Herplant naar een toekomstige dag voor dezelfde persoon
 
+        Respecteert taak-specifieke regels:
+        - uitruimen_ochtend: alleen doordeweeks (niet weekend)
+        - karton_papier: minstens 2 dagen ertussen
+        - glas: minstens 5 dagen ertussen
+
         Returns:
             Updated schedule dict met herplande taken toegevoegd
         """
@@ -1006,13 +1022,41 @@ class TaskEngine:
 
         # Track welke tijdslots al bezet zijn per dag per persoon
         member_day_slots = {day_idx: {m.name: set() for m in members} for day_idx in range(7)}
+        # Track welke dagen specifieke taken al hebben (voor spacing rules)
+        task_scheduled_days = {}  # task_name -> list of day indices
+
         for day_idx in range(7):
             day_name = DAY_NAMES[day_idx]
             for task_info in schedule[day_name]["tasks"]:
                 assigned = task_info.get("assigned_to")
+                t_name = task_info["task_name"]
+
                 if assigned and not task_info.get("missed"):
                     time_slot = task_info.get("time_of_day", "avond")
                     member_day_slots[day_idx][assigned].add(time_slot)
+
+                    # Track taken met spacing requirements
+                    if t_name not in task_scheduled_days:
+                        task_scheduled_days[t_name] = []
+                    if not task_info.get("missed"):
+                        task_scheduled_days[t_name].append(day_idx)
+
+        def is_valid_day_for_task(task_name: str, target_day_idx: int, task: Task) -> bool:
+            """Check of een dag geschikt is voor een taak."""
+            # Regel 1: Weekday-only taken niet op weekend (zaterdag=5, zondag=6)
+            if task.name in WEEKDAY_ONLY_TASKS or task_name in WEEKDAY_ONLY_TASKS:
+                if target_day_idx >= 5:  # Weekend
+                    return False
+
+            # Regel 2: Check spacing requirements
+            min_spacing = TASK_MIN_SPACING.get(task.name) or TASK_MIN_SPACING.get(task_name)
+            if min_spacing:
+                existing_days = task_scheduled_days.get(task_name, [])
+                for existing_day in existing_days:
+                    if abs(target_day_idx - existing_day) < min_spacing:
+                        return False
+
+            return True
 
         # Herplan elke gemiste taak
         for missed in missed_tasks:
@@ -1048,6 +1092,10 @@ class TaskEngine:
                 target_day_name = DAY_NAMES[target_day_idx]
                 available = day_availability.get(target_day_name, [])
 
+                # Check taak-specifieke regels (weekday-only, spacing)
+                if not is_valid_day_for_task(task_name, target_day_idx, task):
+                    continue
+
                 # Check of originele persoon beschikbaar is en tijdslot vrij heeft
                 member_available = any(m.name == original_member for m in available)
                 slot_free = time_slot not in member_day_slots[target_day_idx].get(original_member, set())
@@ -1067,6 +1115,10 @@ class TaskEngine:
 
                     # Update tijdslot tracking
                     member_day_slots[target_day_idx][original_member].add(time_slot)
+                    # Update task scheduling tracking
+                    if task_name not in task_scheduled_days:
+                        task_scheduled_days[task_name] = []
+                    task_scheduled_days[task_name].append(target_day_idx)
 
                     # Sla ook op in database
                     member = next((m for m in members if m.name == original_member), None)
@@ -1093,6 +1145,10 @@ class TaskEngine:
                     target_day_name = DAY_NAMES[target_day_idx]
                     available = day_availability.get(target_day_name, [])
 
+                    # Check taak-specifieke regels (weekday-only, spacing)
+                    if not is_valid_day_for_task(task_name, target_day_idx, task):
+                        continue
+
                     for m in available:
                         if time_slot not in member_day_slots[target_day_idx].get(m.name, set()):
                             # Herplan naar deze persoon
@@ -1107,6 +1163,10 @@ class TaskEngine:
                                 "rescheduled_from": missed["original_day"]
                             })
                             member_day_slots[target_day_idx][m.name].add(time_slot)
+                            # Update task scheduling tracking
+                            if task_name not in task_scheduled_days:
+                                task_scheduled_days[task_name] = []
+                            task_scheduled_days[task_name].append(target_day_idx)
 
                             try:
                                 db.add_assignment(
@@ -1403,6 +1463,8 @@ class TaskEngine:
         - Voorkeur voor dagen waar mensen beschikbaar zijn
         - Spreiding over de week voor afwisseling
         - Taken met lagere targets worden verspreid over verschillende dagen
+        - Weekday-only taken (uitruimen_ochtend) alleen ma-vr
+        - Spacing rules voor karton/glas (minstens X dagen ertussen)
         """
         task_days = {}
 
@@ -1422,54 +1484,127 @@ class TaskEngine:
             # Bepaal geschikte dagen (waar minstens 1 persoon beschikbaar is)
             suitable_days = []
             for day_idx, day_name in enumerate(DAY_NAMES):
-                if day_availability[day_name]:  # Er is iemand beschikbaar
-                    suitable_days.append(day_idx)
+                if not day_availability[day_name]:
+                    continue  # Niemand beschikbaar
+
+                # Check weekday-only regel
+                if task.name in WEEKDAY_ONLY_TASKS:
+                    if day_idx >= 5:  # Weekend (zaterdag=5, zondag=6)
+                        continue
+
+                suitable_days.append(day_idx)
 
             if not suitable_days:
                 continue
 
+            # Check of er spacing requirements zijn
+            min_spacing = TASK_MIN_SPACING.get(task.name)
+
             # Verdeel taken gelijkmatig over beschikbare dagen
             if target >= len(suitable_days):
                 # Taak moet (bijna) elke dag: gebruik alle beschikbare dagen
-                task_days[task.name] = suitable_days[:target]
-                for day_idx in task_days[task.name]:
+                # Bij spacing requirements, respecteer die
+                if min_spacing:
+                    selected = self._select_days_with_spacing(suitable_days, target, min_spacing)
+                else:
+                    selected = suitable_days[:target]
+                task_days[task.name] = selected
+                for day_idx in selected:
                     day_task_count[day_idx] += 1
             else:
                 # Verspreid taken zo goed mogelijk met voorkeur voor minst belaste dagen
-                # Sorteer geschikte dagen op huidige belasting
-                sorted_suitable = sorted(suitable_days, key=lambda d: day_task_count[d])
-
-                # Kies de dagen met minste taken, maar wel verspreid
                 selected = []
-                step = len(suitable_days) / target
 
-                for i in range(target):
-                    # Bereken ideale positie in de week
-                    ideal_pos = i * step
-                    # Vind de dag dichtstbij ideale positie die nog niet gekozen is
-                    best_day = None
-                    best_score = float('inf')
+                if min_spacing:
+                    # Gebruik spacing-aware selectie
+                    selected = self._select_days_with_spacing(suitable_days, target, min_spacing, day_task_count)
+                else:
+                    # Standaard selectie: verspreid over de week
+                    step = len(suitable_days) / target
 
-                    for day_idx in suitable_days:
-                        if day_idx in selected:
-                            continue
-                        # Score = afstand van ideale positie + belasting penalty
-                        pos_in_suitable = suitable_days.index(day_idx)
-                        distance = abs(pos_in_suitable - ideal_pos)
-                        load_penalty = day_task_count[day_idx] * 0.5
-                        score = distance + load_penalty
+                    for i in range(target):
+                        # Bereken ideale positie in de week
+                        ideal_pos = i * step
+                        # Vind de dag dichtstbij ideale positie die nog niet gekozen is
+                        best_day = None
+                        best_score = float('inf')
 
-                        if score < best_score:
-                            best_score = score
-                            best_day = day_idx
+                        for day_idx in suitable_days:
+                            if day_idx in selected:
+                                continue
+                            # Score = afstand van ideale positie + belasting penalty
+                            pos_in_suitable = suitable_days.index(day_idx)
+                            distance = abs(pos_in_suitable - ideal_pos)
+                            load_penalty = day_task_count[day_idx] * 0.5
+                            score = distance + load_penalty
 
-                    if best_day is not None:
-                        selected.append(best_day)
-                        day_task_count[best_day] += 1
+                            if score < best_score:
+                                best_score = score
+                                best_day = day_idx
+
+                        if best_day is not None:
+                            selected.append(best_day)
+                            day_task_count[best_day] += 1
 
                 task_days[task.name] = sorted(selected)
 
         return task_days
+
+    def _select_days_with_spacing(self, suitable_days: list, target: int,
+                                    min_spacing: int, day_task_count: dict = None) -> list:
+        """Selecteer dagen met minimale spacing ertussen.
+
+        Args:
+            suitable_days: Lijst van geschikte dag-indices
+            target: Hoeveel dagen we moeten selecteren
+            min_spacing: Minimale afstand tussen dagen
+            day_task_count: Optioneel - dict met taken per dag voor load balancing
+
+        Returns:
+            Lijst van geselecteerde dag-indices
+        """
+        if not suitable_days:
+            return []
+
+        selected = []
+
+        # Sorteer op dag-index voor logische volgorde
+        sorted_days = sorted(suitable_days)
+
+        # Greedy selectie met spacing check
+        for day_idx in sorted_days:
+            if len(selected) >= target:
+                break
+
+            # Check spacing met al geselecteerde dagen
+            valid = True
+            for selected_day in selected:
+                if abs(day_idx - selected_day) < min_spacing:
+                    valid = False
+                    break
+
+            if valid:
+                selected.append(day_idx)
+
+        # Als we niet genoeg dagen konden selecteren met spacing,
+        # probeer met relaxte spacing (half zo streng)
+        if len(selected) < target and min_spacing > 1:
+            relaxed_spacing = max(1, min_spacing // 2)
+            selected = []
+            for day_idx in sorted_days:
+                if len(selected) >= target:
+                    break
+
+                valid = True
+                for selected_day in selected:
+                    if abs(day_idx - selected_day) < relaxed_spacing:
+                        valid = False
+                        break
+
+                if valid:
+                    selected.append(day_idx)
+
+        return sorted(selected)
 
     def _generate_ascii_schedule(self, schedule: dict, week_start: date,
                                    day_availability: dict, member_totals: dict,
