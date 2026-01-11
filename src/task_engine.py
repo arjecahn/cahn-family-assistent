@@ -229,7 +229,8 @@ class TaskEngine:
         return completion
 
     def _handle_rescheduling(self, member: Member, completed_task: Task,
-                               week_number: int, year: int, day_of_week: int):
+                               week_number: int, year: int, day_of_week: int,
+                               tasks_lookup: Optional[dict] = None):
         """Handle herplanning wanneer iemand een andere taak deed dan gepland.
 
         Scenario: Nora stond ingepland voor inruimen, maar deed dekken.
@@ -237,6 +238,11 @@ class TaskEngine:
         """
         # Haal de assignments van vandaag op voor dit lid
         today_assignments = db.get_assignments_for_day(week_number, year, day_of_week)
+
+        # Bouw tasks lookup als we die nog niet hebben (performance)
+        if not tasks_lookup:
+            all_tasks = db.get_all_tasks()
+            tasks_lookup = {t.display_name: t for t in all_tasks}
 
         # Vind de assignment voor de completed task
         completed_assignment = None
@@ -251,8 +257,8 @@ class TaskEngine:
 
         for a in today_assignments:
             if a.member_id == member.id and a.task_name != completed_task.display_name:
-                # Check of het in hetzelfde tijdslot zit
-                original_task = db.get_task_by_name(a.task_name)
+                # Check of het in hetzelfde tijdslot zit (via lookup, geen DB query)
+                original_task = tasks_lookup.get(a.task_name)
                 if original_task and original_task.time_of_day == time_slot:
                     member_original_assignment = a
                     break
@@ -274,25 +280,54 @@ class TaskEngine:
                 week_number,
                 year,
                 day_of_week,
-                preferred_member=original_assignee  # Geef voorkeur aan wie vrijkwam
+                preferred_member=original_assignee,  # Geef voorkeur aan wie vrijkwam
+                tasks_lookup=tasks_lookup
             )
 
     def _reschedule_task(self, original_assignment: ScheduleAssignment,
                           week_number: int, year: int, current_day: int,
-                          preferred_member: Optional[str] = None):
+                          preferred_member: Optional[str] = None,
+                          tasks_lookup: Optional[dict] = None):
         """Herplan een taak naar een andere dag/persoon.
+
+        BELANGRIJK: Herplanning gebeurt alleen VOORUIT in de tijd.
+        Als current_day in het verleden ligt, wordt er vanaf vandaag gepland.
 
         Prioriteit:
         1. De preferred_member (als die beschikbaar is en tijdslot vrij heeft)
         2. Dezelfde dag, ander beschikbaar kind
         3. Volgende dagen in de week
         """
-        task = db.get_task_by_name(original_assignment.task_name)
+        # Gebruik lookup dict als beschikbaar, anders ophalen
+        if tasks_lookup:
+            task = tasks_lookup.get(original_assignment.task_name)
+        else:
+            task = db.get_task_by_name(original_assignment.task_name)
         if not task:
             return
 
         week_start = self.get_week_start(week_number)
         week_end = week_start + timedelta(days=6)
+
+        # === FORWARD-ONLY CHECK ===
+        # Je kan niet herplannen naar het verleden. Als de completion_day in het
+        # verleden ligt, start dan vanaf vandaag.
+        today = today_local()
+        today_weekday = today.weekday()
+
+        # Check of we in dezelfde week zitten
+        if today >= week_start and today <= week_end:
+            # We zitten in de huidige week - herplan alleen naar vandaag of later
+            earliest_day = max(current_day, today_weekday)
+        else:
+            # De week is volledig in het verleden - niets te herplannen
+            db.delete_assignment(original_assignment.id)
+            return
+
+        # Als we op zondag zijn (dag 6), is er geen ruimte meer om te herplannen
+        if earliest_day > 6:
+            db.delete_assignment(original_assignment.id)
+            return
 
         members = db.get_all_members()
         week_absences = db.get_absences_for_week(week_start, week_end)
@@ -302,6 +337,11 @@ class TaskEngine:
 
         # Haal alle bestaande assignments op voor de week (VERS ophalen na update)
         all_assignments = db.get_schedule_for_week(week_number, year)
+
+        # Bouw tasks lookup als we die nog niet hebben
+        if not tasks_lookup:
+            all_tasks = db.get_all_tasks()
+            tasks_lookup = {t.display_name: t for t in all_tasks}
 
         # Track hoeveel taken per persoon deze week heeft
         member_counts = {m.name: 0 for m in members}
@@ -313,35 +353,60 @@ class TaskEngine:
         member_day_slots = {day_idx: {m.name: set() for m in members} for day_idx in range(7)}
         for a in all_assignments:
             if a.id != original_assignment.id:
-                a_task = db.get_task_by_name(a.task_name)
+                a_task = tasks_lookup.get(a.task_name)
                 if a_task:
                     member_day_slots[a.day_of_week][a.member_name].add(a_task.time_of_day)
 
         time_slot = task.time_of_day
-        day_name = DAY_NAMES[current_day]
+        day_name = DAY_NAMES[earliest_day]
         available_today = day_availability.get(day_name, [])
 
         # Prioriteit 1: preferred_member (degene wiens taak werd overgenomen)
         if preferred_member:
             for m in available_today:
                 if m.name == preferred_member:
-                    if time_slot not in member_day_slots[current_day].get(m.name, set()):
+                    if time_slot not in member_day_slots[earliest_day].get(m.name, set()):
                         # Preferred member kan het vandaag doen!
-                        db.update_assignment(original_assignment.id, m.id, m.name)
+                        # Als we naar een andere dag moeten, verwijder en maak nieuwe assignment
+                        if earliest_day != original_assignment.day_of_week:
+                            db.delete_assignment(original_assignment.id)
+                            db.add_assignment(
+                                week_number=week_number,
+                                year=year,
+                                day_of_week=earliest_day,
+                                task_id=task.id,
+                                task_name=task.display_name,
+                                member_id=m.id,
+                                member_name=m.name
+                            )
+                        else:
+                            db.update_assignment(original_assignment.id, m.id, m.name)
                         return
                     break  # Preferred member gevonden maar kan niet, ga door met anderen
 
-        # Prioriteit 2: dezelfde dag, ander beschikbaar kind
+        # Prioriteit 2: dezelfde dag (earliest_day), ander beschikbaar kind
         for m in sorted(available_today, key=lambda x: member_counts.get(x.name, 0)):
             if m.id == original_assignment.member_id:
                 continue  # Skip de originele persoon
-            if time_slot not in member_day_slots[current_day].get(m.name, set()):
-                # Deze persoon kan het vandaag doen!
-                db.update_assignment(original_assignment.id, m.id, m.name)
+            if time_slot not in member_day_slots[earliest_day].get(m.name, set()):
+                # Deze persoon kan het doen!
+                if earliest_day != original_assignment.day_of_week:
+                    db.delete_assignment(original_assignment.id)
+                    db.add_assignment(
+                        week_number=week_number,
+                        year=year,
+                        day_of_week=earliest_day,
+                        task_id=task.id,
+                        task_name=task.display_name,
+                        member_id=m.id,
+                        member_name=m.name
+                    )
+                else:
+                    db.update_assignment(original_assignment.id, m.id, m.name)
                 return
 
-        # Als vandaag niet lukt, probeer de resterende dagen van de week
-        for day_idx in range(current_day + 1, 7):
+        # Als earliest_day niet lukt, probeer de resterende dagen van de week
+        for day_idx in range(earliest_day + 1, 7):
             day_name = DAY_NAMES[day_idx]
             available = day_availability.get(day_name, [])
 
@@ -604,7 +669,7 @@ class TaskEngine:
         }
 
     def _find_member_for_task(self, task: Task, week_number: int, year: int,
-                                day_of_week: int) -> Optional[Member]:
+                                day_of_week: int, tasks_lookup: Optional[dict] = None) -> Optional[Member]:
         """Vind een geschikt lid om een taak te doen op een specifieke dag."""
         week_start = self.get_week_start(week_number)
         week_end = week_start + timedelta(days=6)
@@ -619,6 +684,11 @@ class TaskEngine:
         if not available:
             return None
 
+        # Bouw tasks lookup als we die nog niet hebben (performance)
+        if not tasks_lookup:
+            all_tasks = db.get_all_tasks()
+            tasks_lookup = {t.display_name: t for t in all_tasks}
+
         # Tel taken per persoon
         all_assignments = db.get_schedule_for_week(week_number, year)
         member_counts = {m.name: 0 for m in members}
@@ -627,7 +697,7 @@ class TaskEngine:
         for a in all_assignments:
             member_counts[a.member_name] = member_counts.get(a.member_name, 0) + 1
             if a.day_of_week == day_of_week:
-                a_task = db.get_task_by_name(a.task_name)
+                a_task = tasks_lookup.get(a.task_name)
                 if a_task:
                     member_day_slots[a.member_name].add(a_task.time_of_day)
 
@@ -665,6 +735,9 @@ class TaskEngine:
         all_completions = db.get_completions_for_week(week_number)
         week_absences = db.get_absences_for_week(week_start, week_end)
 
+        # Maak lookup dict voor snelle task lookup (voorkomt N+1 queries)
+        tasks_lookup = {t.display_name: t for t in tasks}
+
         # Bepaal per dag wie beschikbaar is
         day_availability = self._calculate_day_availability(members, week_start, week_absences)
 
@@ -673,7 +746,7 @@ class TaskEngine:
             # Laad opgeslagen rooster
             stored_assignments = db.get_schedule_for_week(week_number, year)
             schedule = self._build_schedule_from_stored(
-                stored_assignments, all_completions, week_start, day_availability
+                stored_assignments, all_completions, week_start, day_availability, tasks_lookup
             )
         else:
             # Genereer nieuw rooster en sla op
@@ -719,8 +792,13 @@ class TaskEngine:
         return day_availability
 
     def _build_schedule_from_stored(self, stored_assignments: list, completions: list,
-                                      week_start: date, day_availability: dict) -> dict:
-        """Bouw het schedule-object op basis van opgeslagen assignments."""
+                                      week_start: date, day_availability: dict,
+                                      tasks_lookup: dict) -> dict:
+        """Bouw het schedule-object op basis van opgeslagen assignments.
+
+        Args:
+            tasks_lookup: Dict van task display_name -> Task object voor snelle lookup
+        """
         schedule = {}
         for day_idx in range(7):
             day_name = DAY_NAMES[day_idx]
@@ -745,8 +823,8 @@ class TaskEngine:
                     done_by = c.member_name
                     break
 
-            # Haal time_of_day op (we hebben het nodig voor sortering)
-            task = db.get_task_by_name(assignment.task_name)
+            # Haal time_of_day op uit de lookup (geen database query!)
+            task = tasks_lookup.get(assignment.task_name)
             time_of_day = task.time_of_day if task else "avond"
 
             schedule[day_name]["tasks"].append({
