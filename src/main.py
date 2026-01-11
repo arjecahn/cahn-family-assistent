@@ -15,7 +15,6 @@ from .database import (
     migrate_add_fairness_balance_table, get_all_fairness_balances, normalize_fairness_balances,
     get_all_members
 )
-from .voice_handlers import handle_google_action
 
 app = FastAPI(
     title="Cahn Family Task Assistant",
@@ -581,17 +580,6 @@ async def reset_fairness():
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
-
-# === Google Actions Webhook ===
-
-@app.post("/webhook/google")
-async def google_actions_webhook(request: dict):
-    """
-    Webhook endpoint voor Google Actions.
-    Ontvangt requests van Google Assistant en stuurt responses terug.
-    """
-    return handle_google_action(request)
 
 
 # === Local development ===
