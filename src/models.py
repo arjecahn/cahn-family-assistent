@@ -55,3 +55,20 @@ class Absence(BaseModel):
     start_date: date
     end_date: date
     reason: Optional[str] = None
+
+
+class ScheduleAssignment(BaseModel):
+    """Toegewezen taak in het weekrooster.
+
+    Dit is de geplande toewijzing, niet de daadwerkelijke voltooiing.
+    Completions worden apart bijgehouden.
+    """
+    id: str
+    week_number: int
+    year: int
+    day_of_week: int  # 0=maandag, 6=zondag
+    task_id: str
+    task_name: str
+    member_id: str
+    member_name: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)

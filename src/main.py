@@ -10,7 +10,7 @@ from .task_engine import engine
 from .database import (
     seed_initial_data, reset_tasks_2026, get_all_tasks,
     get_member_by_name, get_last_completion_for_member, delete_completion,
-    migrate_add_cascade_delete
+    migrate_add_cascade_delete, migrate_add_schedule_table
 )
 from .voice_handlers import handle_google_action
 
@@ -80,6 +80,20 @@ async def run_cascade_migration():
     try:
         migrate_add_cascade_delete()
         return {"status": "ok", "message": "CASCADE DELETE constraints toegevoegd"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/migrate/schedule-table")
+async def run_schedule_table_migration():
+    """Voer migratie uit om schedule_assignments tabel toe te voegen.
+
+    Dit is nodig voor persistent weekroosters.
+    Veilig om meerdere keren uit te voeren.
+    """
+    try:
+        migrate_add_schedule_table()
+        return {"status": "ok", "message": "schedule_assignments tabel aangemaakt"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -167,6 +181,13 @@ class UndoRequest(BaseModel):
     member_name: str
 
 
+class UndoTaskRequest(BaseModel):
+    """Specifieke taak ongedaan maken."""
+    member_name: str
+    task_name: str
+    completed_date: Optional[date] = None  # Default: vandaag
+
+
 @app.get("/api/suggest/{task_name}")
 async def suggest_for_task(task_name: str):
     """Suggereer wie een taak moet doen."""
@@ -247,7 +268,8 @@ async def complete_tasks_bulk(request: BulkCompletionRequest):
 async def undo_last_task(request: UndoRequest):
     """Maak de laatst voltooide taak ongedaan voor een gezinslid.
 
-    Handig als iemand per ongeluk de verkeerde taak heeft afgevinkt.
+    DEPRECATED: Gebruik /api/undo/task voor specifieke undo.
+    Deze endpoint kan conflicten geven bij meerdere ChatGPT sessies.
     """
     member = get_member_by_name(request.member_name)
     if not member:
@@ -274,6 +296,26 @@ async def undo_last_task(request: UndoRequest):
             "success": False,
             "message": "Kon de taak niet ongedaan maken"
         }
+
+
+@app.post("/api/undo/task")
+async def undo_specific_task(request: UndoTaskRequest):
+    """Maak een specifieke taak ongedaan.
+
+    Beter dan /api/undo omdat het specifiek is en geen conflicten geeft
+    bij meerdere ChatGPT sessies.
+
+    De taak wordt weer op het rooster gezet (herplanning).
+    """
+    try:
+        result = engine.undo_task_completion(
+            request.member_name,
+            request.task_name,
+            request.completed_date
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @app.post("/api/absence")
@@ -305,10 +347,31 @@ async def weekly_summary():
 async def week_schedule():
     """Haal het weekrooster op met ASCII/emoji overzicht.
 
+    Het rooster wordt persistent opgeslagen:
+    - Eerste keer in een week: rooster genereren en opslaan
+    - Daarna: opgeslagen rooster teruggeven
+
     Dit toont per dag wie welke taken moet doen, met afvinkbare checkboxes.
-    Gebruik dit om het rooster te tonen aan de kinderen.
     """
     return engine.get_week_schedule()
+
+
+@app.post("/api/schedule/regenerate")
+async def regenerate_schedule():
+    """Forceer het opnieuw genereren van het weekrooster.
+
+    LET OP: Dit verwijdert het bestaande rooster voor deze week!
+    Alleen gebruiken in uitzonderlijke gevallen (bijv. na database reset).
+    """
+    try:
+        result = engine.regenerate_schedule()
+        return {
+            "success": True,
+            "message": "Rooster opnieuw gegenereerd",
+            "schedule": result
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 @app.post("/api/swap/request")

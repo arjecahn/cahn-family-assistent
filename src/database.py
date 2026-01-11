@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from .models import Member, Task, Completion, Absence, Swap
+from .models import Member, Task, Completion, Absence, Swap, ScheduleAssignment
 
 # Timezone voor de familie (Nederland)
 TIMEZONE = ZoneInfo("Europe/Amsterdam")
@@ -117,6 +117,22 @@ def init_db():
             swap_date DATE,
             status VARCHAR(20) DEFAULT 'pending',
             created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Schedule assignments - persistent weekrooster
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS schedule_assignments (
+            id SERIAL PRIMARY KEY,
+            week_number INTEGER NOT NULL,
+            year INTEGER NOT NULL,
+            day_of_week INTEGER NOT NULL,
+            task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+            task_name VARCHAR(100),
+            member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+            member_name VARCHAR(50),
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(week_number, year, day_of_week, task_id)
         )
     """)
 
@@ -766,3 +782,250 @@ def update_swap_status(swap_id: str, status: str):
     conn.commit()
     cur.close()
     conn.close()
+
+
+# CRUD operaties voor Schedule Assignments
+def schedule_exists_for_week(week_number: int, year: int) -> bool:
+    """Check of er al een rooster bestaat voor deze week."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT COUNT(*) as count FROM schedule_assignments
+        WHERE week_number = %s AND year = %s
+    """, (week_number, year))
+    count = cur.fetchone()["count"]
+    cur.close()
+    conn.close()
+    return count > 0
+
+
+def get_schedule_for_week(week_number: int, year: int) -> list[ScheduleAssignment]:
+    """Haal het opgeslagen rooster op voor een week."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, week_number, year, day_of_week, task_id, task_name, member_id, member_name, created_at
+        FROM schedule_assignments
+        WHERE week_number = %s AND year = %s
+        ORDER BY day_of_week, task_name
+    """, (week_number, year))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [ScheduleAssignment(
+        id=str(r["id"]),
+        week_number=r["week_number"],
+        year=r["year"],
+        day_of_week=r["day_of_week"],
+        task_id=str(r["task_id"]),
+        task_name=r["task_name"],
+        member_id=str(r["member_id"]),
+        member_name=r["member_name"],
+        created_at=r["created_at"]
+    ) for r in rows]
+
+
+def save_schedule_for_week(week_number: int, year: int, assignments: list[dict]) -> list[ScheduleAssignment]:
+    """Sla een nieuw weekrooster op.
+
+    assignments: lijst van dicts met keys:
+        day_of_week, task_id, task_name, member_id, member_name
+    """
+    conn = get_db()
+    cur = conn.cursor()
+    results = []
+
+    try:
+        for assignment in assignments:
+            cur.execute("""
+                INSERT INTO schedule_assignments
+                    (week_number, year, day_of_week, task_id, task_name, member_id, member_name)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, created_at
+            """, (
+                week_number,
+                year,
+                assignment["day_of_week"],
+                int(assignment["task_id"]),
+                assignment["task_name"],
+                int(assignment["member_id"]),
+                assignment["member_name"]
+            ))
+            row = cur.fetchone()
+            results.append(ScheduleAssignment(
+                id=str(row["id"]),
+                week_number=week_number,
+                year=year,
+                day_of_week=assignment["day_of_week"],
+                task_id=str(assignment["task_id"]),
+                task_name=assignment["task_name"],
+                member_id=str(assignment["member_id"]),
+                member_name=assignment["member_name"],
+                created_at=row["created_at"]
+            ))
+
+        conn.commit()
+        return results
+
+    except Exception as e:
+        conn.rollback()
+        raise e
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def delete_schedule_for_week(week_number: int, year: int) -> int:
+    """Verwijder het rooster voor een week (voor regeneratie)."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        DELETE FROM schedule_assignments
+        WHERE week_number = %s AND year = %s
+    """, (week_number, year))
+    deleted_count = cur.rowcount
+    conn.commit()
+    cur.close()
+    conn.close()
+    return deleted_count
+
+
+def update_assignment(assignment_id: str, member_id: str, member_name: str) -> bool:
+    """Update een assignment naar een andere persoon (herplanning)."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE schedule_assignments
+        SET member_id = %s, member_name = %s
+        WHERE id = %s
+    """, (int(member_id), member_name, int(assignment_id)))
+    updated = cur.rowcount > 0
+    conn.commit()
+    cur.close()
+    conn.close()
+    return updated
+
+
+def delete_assignment(assignment_id: str) -> bool:
+    """Verwijder een specifieke assignment."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM schedule_assignments WHERE id = %s", (int(assignment_id),))
+    deleted = cur.rowcount > 0
+    conn.commit()
+    cur.close()
+    conn.close()
+    return deleted
+
+
+def get_assignments_for_day(week_number: int, year: int, day_of_week: int) -> list[ScheduleAssignment]:
+    """Haal alle assignments op voor een specifieke dag."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, week_number, year, day_of_week, task_id, task_name, member_id, member_name, created_at
+        FROM schedule_assignments
+        WHERE week_number = %s AND year = %s AND day_of_week = %s
+    """, (week_number, year, day_of_week))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [ScheduleAssignment(
+        id=str(r["id"]),
+        week_number=r["week_number"],
+        year=r["year"],
+        day_of_week=r["day_of_week"],
+        task_id=str(r["task_id"]),
+        task_name=r["task_name"],
+        member_id=str(r["member_id"]),
+        member_name=r["member_name"],
+        created_at=r["created_at"]
+    ) for r in rows]
+
+
+def get_member_assignments_for_day(member_id: str, week_number: int, year: int, day_of_week: int) -> list[ScheduleAssignment]:
+    """Haal assignments op voor een specifiek lid op een dag (voor tijdslot check)."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT sa.id, sa.week_number, sa.year, sa.day_of_week, sa.task_id, sa.task_name,
+               sa.member_id, sa.member_name, sa.created_at, t.time_of_day
+        FROM schedule_assignments sa
+        JOIN tasks t ON sa.task_id = t.id
+        WHERE sa.member_id = %s AND sa.week_number = %s AND sa.year = %s AND sa.day_of_week = %s
+    """, (int(member_id), week_number, year, day_of_week))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [ScheduleAssignment(
+        id=str(r["id"]),
+        week_number=r["week_number"],
+        year=r["year"],
+        day_of_week=r["day_of_week"],
+        task_id=str(r["task_id"]),
+        task_name=r["task_name"],
+        member_id=str(r["member_id"]),
+        member_name=r["member_name"],
+        created_at=r["created_at"]
+    ) for r in rows]
+
+
+def add_assignment(week_number: int, year: int, day_of_week: int, task_id: str, task_name: str, member_id: str, member_name: str) -> ScheduleAssignment:
+    """Voeg een nieuwe assignment toe (voor herplanning)."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO schedule_assignments
+            (week_number, year, day_of_week, task_id, task_name, member_id, member_name)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        RETURNING id, created_at
+    """, (week_number, year, day_of_week, int(task_id), task_name, int(member_id), member_name))
+    row = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+    return ScheduleAssignment(
+        id=str(row["id"]),
+        week_number=week_number,
+        year=year,
+        day_of_week=day_of_week,
+        task_id=str(task_id),
+        task_name=task_name,
+        member_id=str(member_id),
+        member_name=member_name,
+        created_at=row["created_at"]
+    )
+
+
+def migrate_add_schedule_table():
+    """Migratie: voeg schedule_assignments tabel toe aan bestaande database."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS schedule_assignments (
+                id SERIAL PRIMARY KEY,
+                week_number INTEGER NOT NULL,
+                year INTEGER NOT NULL,
+                day_of_week INTEGER NOT NULL,
+                task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+                task_name VARCHAR(100),
+                member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+                member_name VARCHAR(50),
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(week_number, year, day_of_week, task_id)
+            )
+        """)
+        conn.commit()
+        print("schedule_assignments tabel aangemaakt!")
+
+    except Exception as e:
+        conn.rollback()
+        print(f"Migratie fout: {e}")
+        raise e
+
+    finally:
+        cur.close()
+        conn.close()
