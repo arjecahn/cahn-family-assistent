@@ -813,6 +813,9 @@ class TaskEngine:
                 "tasks": []
             }
 
+        # Track welke completions al zijn gematcht met een assignment
+        matched_completions = set()
+
         # Groepeer assignments per dag
         for assignment in stored_assignments:
             day_idx = assignment.day_of_week
@@ -826,6 +829,7 @@ class TaskEngine:
                 if c.task_name == assignment.task_name and c.completed_at.date() == day_date:
                     completed = True
                     done_by = c.member_name
+                    matched_completions.add(c.id)
                     break
 
             # Haal time_of_day op uit de lookup (geen database query!)
@@ -837,7 +841,31 @@ class TaskEngine:
                 "assigned_to": assignment.member_name,
                 "completed": completed,
                 "completed_by": done_by if completed else None,
-                "time_of_day": time_of_day
+                "time_of_day": time_of_day,
+                "extra": False
+            })
+
+        # Voeg "extra" completions toe die niet in het rooster stonden
+        for c in completions:
+            if c.id in matched_completions:
+                continue  # Al gematcht met een assignment
+
+            day_date = c.completed_at.date()
+            day_idx = (day_date - week_start).days
+            if day_idx < 0 or day_idx > 6:
+                continue  # Buiten deze week
+
+            day_name = DAY_NAMES[day_idx]
+            task = tasks_lookup.get(c.task_name)
+            time_of_day = task.time_of_day if task else "avond"
+
+            schedule[day_name]["tasks"].append({
+                "task_name": c.task_name,
+                "assigned_to": None,  # Was niet gepland
+                "completed": True,
+                "completed_by": c.member_name,
+                "time_of_day": time_of_day,
+                "extra": True  # Markeer als extra/bonus taak
             })
 
         # Sorteer taken per dag op time_of_day
@@ -1093,9 +1121,15 @@ class TaskEngine:
                     lines.append("║    (geen taken gepland)                           ║")
             else:
                 for day_task in day_tasks:
-                    check = "✅" if day_task["completed"] else "⬜"
+                    # Bepaal icoon: ✅ gedaan, 🌟 extra (niet gepland), ⬜ nog te doen
+                    if day_task.get("extra"):
+                        check = "🌟"  # Extra taak (niet gepland maar wel gedaan)
+                    elif day_task["completed"]:
+                        check = "✅"
+                    else:
+                        check = "⬜"
                     # Toon wie het DEED (completed_by) als af, anders wie GEPLAND staat
-                    name = (day_task.get("completed_by") or day_task["assigned_to"])[:6]
+                    name = (day_task.get("completed_by") or day_task.get("assigned_to") or "?")[:6]
                     task_display = day_task["task_name"][:25]  # Max 25 chars voor taak
                     line = f"{check} {name}: {task_display}"
                     lines.append(f"║    {line:<46}║")
