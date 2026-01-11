@@ -605,8 +605,9 @@ class TaskEngine:
             stats[task.display_name] = {}
             for name in member_names:
                 # Tel hoeveel deze persoon deze taak heeft gedaan
+                # Vergelijk op task_name (display_name) want task_id kan veranderen na reset
                 done = sum(1 for c in completions
-                          if c.member_name == name and c.task_id == task.id)
+                          if c.member_name == name and c.task_name == task.display_name)
                 stats[task.display_name][name] = {
                     "done": done,
                     "target": monthly_target_per_person
