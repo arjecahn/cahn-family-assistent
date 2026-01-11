@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from .task_engine import engine
-from .database import seed_initial_data
+from .database import seed_initial_data, reset_tasks_2026, get_all_tasks
 from .voice_handlers import handle_google_action
 
 app = FastAPI(
@@ -61,6 +61,49 @@ async def init_database():
     try:
         seed_initial_data()
         return {"status": "ok", "message": "Database geinitialiseerd"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/tasks")
+async def list_tasks():
+    """Haal alle taken op met hun volledige configuratie."""
+    tasks = get_all_tasks()
+    return [
+        {
+            "name": t.name,
+            "display_name": t.display_name,
+            "description": t.description,
+            "weekly_target": t.weekly_target,
+            "per_child_target": t.per_child_target,
+            "rotation_weeks": t.rotation_weeks,
+            "time_of_day": t.time_of_day
+        }
+        for t in tasks
+    ]
+
+
+@app.post("/api/tasks/reset-2026")
+async def reset_to_2026():
+    """Reset alle taken naar de 2026 afspraken.
+
+    LET OP: Dit verwijdert alle bestaande voltooide taken!
+    """
+    try:
+        reset_tasks_2026()
+        return {
+            "status": "ok",
+            "message": "Taken gereset naar 2026 configuratie",
+            "tasks": [
+                "uitruimen_ochtend (1x/week per kind)",
+                "uitruimen_avond (2x/week per kind)",
+                "inruimen (2x/week per kind)",
+                "dekken (2x/week per kind)",
+                "karton_papier (1x/week per kind)",
+                "glas (1x/3 weken per kind)",
+                "koken (1x/3 weken per kind)"
+            ]
+        }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

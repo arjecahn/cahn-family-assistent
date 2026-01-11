@@ -86,6 +86,8 @@ PostgreSQL via Supabase met automatische URL parsing voor Vercel compatibility.
 |----------|--------|--------------|
 | `/health` | GET | Health check |
 | `/api/init` | GET | Database initialisatie |
+| `/api/tasks` | GET | Alle taken met configuratie |
+| `/api/tasks/reset-2026` | POST | Reset taken naar 2026 afspraken |
 | `/api/suggest/{task}` | GET | Wie moet deze taak doen? |
 | `/api/complete` | POST | Registreer voltooide taak |
 | `/api/summary` | GET | Weekoverzicht |
@@ -146,12 +148,34 @@ API endpoints hebben geen auth - acceptabel voor familie-app met obscure URLs.
 
 **Gezinsleden:** Nora, Linde, Fenna
 
-**Taken met weekly targets:**
-| Taak | Target/week |
-|------|-------------|
-| Uitruimen (ochtend) | 3x |
-| Uitruimen (avond) | 6x |
-| Inruimen | 6x |
-| Dekken | 6x |
-| Karton/papier wegbrengen | 3x |
-| Glas wegbrengen | 1x |
+### Afspraken 2026
+
+| Taak | Per kind/week | Totaal/week | Beschrijving |
+|------|--------------|-------------|--------------|
+| Uitruimen ochtend | 1x | 3x | Afwasmachine uitruimen vóór school (uiterlijk 11:00). Belangrijk zodat overdag gebruikte spullen direct in de machine kunnen. |
+| Uitruimen avond | 2x | 6x | Afwasmachine uitruimen + pannen schoonmaken + planken schoonmaken |
+| Inruimen | 2x | 6x | Afwasmachine inruimen + aanrecht schoonmaken |
+| Dekken | 2x | 6x | Tafel dekken voor het avondeten + na het eten tafel afnemen en schoonmaken |
+| Karton/papier | 1x | 3x | Karton en oud papier verzamelen en naar container brengen |
+| Glas | 1x per 3 weken | 1x | Glas verzamelen en naar de glasbak brengen |
+| Koken | 1x per 3 weken | 1x | Een maaltijd koken voor het gezin |
+
+### Database Taken Schema
+
+De taken zijn opgeslagen met de volgende velden:
+- `name`: Interne naam (bijv. "uitruimen_ochtend")
+- `display_name`: Vriendelijke naam voor de interface
+- `description`: Volledige omschrijving wat de taak inhoudt
+- `weekly_target`: Hoe vaak per week in totaal (alle kinderen samen)
+- `per_child_target`: Hoe vaak per kind per week
+- `rotation_weeks`: Elke hoeveel weken (1 = wekelijks, 3 = om de 3 weken)
+- `time_of_day`: "ochtend", "middag", of "avond"
+
+### Taken Resetten
+
+Om de taken te resetten naar de 2026 configuratie:
+```bash
+curl -X POST https://cahn-family-assistent.vercel.app/api/tasks/reset-2026
+```
+
+**Let op:** Dit verwijdert alle bestaande voltooide taken!

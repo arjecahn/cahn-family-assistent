@@ -59,7 +59,10 @@ def init_db():
             id SERIAL PRIMARY KEY,
             name VARCHAR(100) NOT NULL,
             display_name VARCHAR(100),
+            description TEXT,
             weekly_target INTEGER DEFAULT 0,
+            per_child_target INTEGER DEFAULT 0,
+            rotation_weeks INTEGER DEFAULT 1,
             time_of_day VARCHAR(20)
         )
     """)
@@ -129,25 +132,147 @@ def seed_initial_data():
     for name in members:
         cur.execute("INSERT INTO members (name) VALUES (%s)", (name,))
 
-    # Taken toevoegen
+    # Taken toevoegen (afspraken 2026)
+    # Format: (name, display_name, description, weekly_target, per_child_target, rotation_weeks, time_of_day)
     tasks = [
-        ("uitruimen_ochtend", "uitruimen voor school", 3, "ochtend"),
-        ("uitruimen_avond", "uitruimen", 6, "avond"),
-        ("inruimen", "inruimen", 6, "avond"),
-        ("dekken", "dekken", 6, "avond"),
-        ("karton_papier", "karton en papier wegbrengen", 3, "middag"),
-        ("glas", "glas wegbrengen", 1, "middag"),
+        (
+            "uitruimen_ochtend",
+            "uitruimen voor school",
+            "Afwasmachine uitruimen vóór school (uiterlijk 11:00). Dit is belangrijk zodat de dingen die overdag worden gebruikt direct in de machine kunnen.",
+            3, 1, 1, "ochtend"
+        ),
+        (
+            "uitruimen_avond",
+            "uitruimen avond",
+            "Afwasmachine uitruimen in de avond + pannen schoonmaken + planken schoonmaken.",
+            6, 2, 1, "avond"
+        ),
+        (
+            "inruimen",
+            "inruimen",
+            "Afwasmachine inruimen in de avond + aanrecht schoonmaken.",
+            6, 2, 1, "avond"
+        ),
+        (
+            "dekken",
+            "dekken",
+            "Tafel dekken voor het avondeten + na het eten de tafel afnemen en zorgen dat die schoon is.",
+            6, 2, 1, "avond"
+        ),
+        (
+            "karton_papier",
+            "karton en papier wegbrengen",
+            "Karton en oud papier verzamelen en naar de container brengen.",
+            3, 1, 1, "middag"
+        ),
+        (
+            "glas",
+            "glas wegbrengen",
+            "Glas verzamelen en naar de glasbak brengen. Elk kind 1x per 3 weken.",
+            1, 1, 3, "middag"
+        ),
+        (
+            "koken",
+            "koken",
+            "Een maaltijd koken voor het gezin. Elk kind 1x per 3 weken.",
+            1, 1, 3, "avond"
+        ),
     ]
-    for name, display_name, target, time in tasks:
+    for name, display_name, description, weekly_target, per_child, rotation, time in tasks:
         cur.execute(
-            "INSERT INTO tasks (name, display_name, weekly_target, time_of_day) VALUES (%s, %s, %s, %s)",
-            (name, display_name, target, time)
+            """INSERT INTO tasks (name, display_name, description, weekly_target, per_child_target, rotation_weeks, time_of_day)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+            (name, display_name, description, weekly_target, per_child, rotation, time)
         )
 
     conn.commit()
     cur.close()
     conn.close()
     print("Database gevuld met gezinsleden en taken!")
+
+
+def reset_tasks_2026():
+    """Reset de taken naar de 2026 configuratie.
+
+    Dit verwijdert alle bestaande taken en voegt de nieuwe taken toe.
+    LET OP: Dit verwijdert ook alle voltooide taken (completions)!
+    """
+    if not DATABASE_URL:
+        print("Geen DATABASE_URL gevonden, skip reset")
+        return
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Verwijder bestaande completions en taken
+    cur.execute("DELETE FROM completions")
+    cur.execute("DELETE FROM swaps")
+    cur.execute("DELETE FROM tasks")
+
+    # Voeg nieuwe kolommen toe als ze nog niet bestaan
+    try:
+        cur.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS description TEXT")
+        cur.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS per_child_target INTEGER DEFAULT 0")
+        cur.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS rotation_weeks INTEGER DEFAULT 1")
+    except Exception as e:
+        print(f"Kolommen bestaan mogelijk al: {e}")
+
+    # Taken toevoegen (afspraken 2026)
+    tasks = [
+        (
+            "uitruimen_ochtend",
+            "uitruimen voor school",
+            "Afwasmachine uitruimen vóór school (uiterlijk 11:00). Dit is belangrijk zodat de dingen die overdag worden gebruikt direct in de machine kunnen.",
+            3, 1, 1, "ochtend"
+        ),
+        (
+            "uitruimen_avond",
+            "uitruimen avond",
+            "Afwasmachine uitruimen in de avond + pannen schoonmaken + planken schoonmaken.",
+            6, 2, 1, "avond"
+        ),
+        (
+            "inruimen",
+            "inruimen",
+            "Afwasmachine inruimen in de avond + aanrecht schoonmaken.",
+            6, 2, 1, "avond"
+        ),
+        (
+            "dekken",
+            "dekken",
+            "Tafel dekken voor het avondeten + na het eten de tafel afnemen en zorgen dat die schoon is.",
+            6, 2, 1, "avond"
+        ),
+        (
+            "karton_papier",
+            "karton en papier wegbrengen",
+            "Karton en oud papier verzamelen en naar de container brengen.",
+            3, 1, 1, "middag"
+        ),
+        (
+            "glas",
+            "glas wegbrengen",
+            "Glas verzamelen en naar de glasbak brengen. Elk kind 1x per 3 weken.",
+            1, 1, 3, "middag"
+        ),
+        (
+            "koken",
+            "koken",
+            "Een maaltijd koken voor het gezin. Elk kind 1x per 3 weken.",
+            1, 1, 3, "avond"
+        ),
+    ]
+    for name, display_name, description, weekly_target, per_child, rotation, time in tasks:
+        cur.execute(
+            """INSERT INTO tasks (name, display_name, description, weekly_target, per_child_target, rotation_weeks, time_of_day)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+            (name, display_name, description, weekly_target, per_child, rotation, time)
+        )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    print("Taken gereset naar 2026 configuratie!")
 
 
 # CRUD operaties voor Members
@@ -180,12 +305,20 @@ def get_all_tasks() -> list[Task]:
     """Haal alle taken op."""
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT id, name, display_name, weekly_target, time_of_day FROM tasks")
+    cur.execute("SELECT id, name, display_name, description, weekly_target, per_child_target, rotation_weeks, time_of_day FROM tasks")
     rows = cur.fetchall()
     cur.close()
     conn.close()
-    return [Task(id=str(r["id"]), name=r["name"], display_name=r["display_name"] or r["name"],
-                 weekly_target=r["weekly_target"] or 0, time_of_day=r["time_of_day"] or "") for r in rows]
+    return [Task(
+        id=str(r["id"]),
+        name=r["name"],
+        display_name=r["display_name"] or r["name"],
+        description=r["description"] or "",
+        weekly_target=r["weekly_target"] or 0,
+        per_child_target=r["per_child_target"] or 0,
+        rotation_weeks=r["rotation_weeks"] or 1,
+        time_of_day=r["time_of_day"] or ""
+    ) for r in rows]
 
 
 def get_task_by_name(name: str) -> Optional[Task]:
@@ -193,15 +326,23 @@ def get_task_by_name(name: str) -> Optional[Task]:
     conn = get_db()
     cur = conn.cursor()
     cur.execute("""
-        SELECT id, name, display_name, weekly_target, time_of_day FROM tasks
+        SELECT id, name, display_name, description, weekly_target, per_child_target, rotation_weeks, time_of_day FROM tasks
         WHERE LOWER(name) = LOWER(%s) OR LOWER(display_name) LIKE LOWER(%s)
     """, (name, f"%{name}%"))
     row = cur.fetchone()
     cur.close()
     conn.close()
     if row:
-        return Task(id=str(row["id"]), name=row["name"], display_name=row["display_name"] or row["name"],
-                   weekly_target=row["weekly_target"] or 0, time_of_day=row["time_of_day"] or "")
+        return Task(
+            id=str(row["id"]),
+            name=row["name"],
+            display_name=row["display_name"] or row["name"],
+            description=row["description"] or "",
+            weekly_target=row["weekly_target"] or 0,
+            per_child_target=row["per_child_target"] or 0,
+            rotation_weeks=row["rotation_weeks"] or 1,
+            time_of_day=row["time_of_day"] or ""
+        )
     return None
 
 

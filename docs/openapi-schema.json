@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Cahn Family Task API",
-    "description": "API voor de Cahn Family Task Assistant - eerlijke takenverdeling voor het gezin",
-    "version": "1.0.0"
+    "description": "API voor de Cahn Family Task Assistant - eerlijke takenverdeling voor het gezin. Taken: uitruimen ochtend (1x/week), uitruimen avond (2x/week), inruimen (2x/week), dekken (2x/week), karton/papier (1x/week), glas (1x/3 weken), koken (1x/3 weken).",
+    "version": "2.0.0"
   },
   "servers": [
     {
@@ -12,6 +12,37 @@
     }
   ],
   "paths": {
+    "/api/tasks": {
+      "get": {
+        "operationId": "listTasks",
+        "summary": "Haal alle taken op met hun configuratie",
+        "description": "Geeft een lijst van alle taken met hun volledige beschrijving en frequentie (per kind per week)",
+        "responses": {
+          "200": {
+            "description": "Lijst van alle taken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": { "type": "string", "description": "Interne naam van de taak" },
+                      "display_name": { "type": "string", "description": "Vriendelijke naam" },
+                      "description": { "type": "string", "description": "Volledige beschrijving wat de taak inhoudt" },
+                      "weekly_target": { "type": "integer", "description": "Totaal aantal keer per week (alle kinderen samen)" },
+                      "per_child_target": { "type": "integer", "description": "Aantal keer per kind per week" },
+                      "rotation_weeks": { "type": "integer", "description": "Elke hoeveel weken (1=wekelijks, 3=om de 3 weken)" },
+                      "time_of_day": { "type": "string", "description": "Tijdstip: ochtend, middag, avond" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/suggest/{task_name}": {
       "get": {
         "operationId": "suggestForTask",
@@ -23,7 +54,7 @@
             "in": "path",
             "required": true,
             "schema": { "type": "string" },
-            "description": "Naam van de taak: dekken, inruimen, uitruimen, karton, glas"
+            "description": "Naam van de taak: uitruimen_ochtend, uitruimen_avond, inruimen, dekken, karton_papier, glas, koken"
           }
         ],
         "responses": {

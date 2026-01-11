@@ -15,7 +15,10 @@ class Task(BaseModel):
     id: str
     name: str  # Interne naam: "uitruimen_avond"
     display_name: str  # Vriendelijke naam: "uitruimen"
-    weekly_target: int = 0  # Hoe vaak per week in totaal
+    description: str = ""  # Volledige omschrijving van wat de taak inhoudt
+    weekly_target: int = 0  # Hoe vaak per week in totaal (3 kinderen)
+    per_child_target: int = 0  # Hoe vaak per kind per week
+    rotation_weeks: int = 1  # Elke hoeveel weken (1 = wekelijks, 3 = om de 3 weken)
     time_of_day: str = ""  # "ochtend", "middag", "avond"
 
 
