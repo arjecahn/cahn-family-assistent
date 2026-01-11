@@ -8,18 +8,37 @@ from psycopg2.extras import RealDictCursor
 from .models import Member, Task, Completion, Absence, Swap
 
 # Database URL - Supabase/Vercel zetten verschillende variabelen
-DATABASE_URL = (
-    os.getenv("POSTGRES_URL") or
-    os.getenv("DATABASE_URL") or
-    os.getenv("SUPABASE_DB_URL") or
-    os.getenv("POSTGRES_URL_NON_POOLING") or
-    ""
-)
+def get_database_url():
+    """Haal de database URL op en clean eventuele ongeldige parameters."""
+    url = (
+        os.getenv("POSTGRES_URL") or
+        os.getenv("DATABASE_URL") or
+        os.getenv("SUPABASE_DB_URL") or
+        os.getenv("POSTGRES_URL_NON_POOLING") or
+        ""
+    )
+    # Verwijder ongeldige query parameters voor psycopg2
+    if "?" in url:
+        base_url = url.split("?")[0]
+        params = url.split("?")[1] if "?" in url else ""
+        # Filter alleen geldige psycopg2 parameters
+        valid_params = []
+        for param in params.split("&"):
+            key = param.split("=")[0] if "=" in param else param
+            if key in ["sslmode", "connect_timeout", "application_name"]:
+                valid_params.append(param)
+        if valid_params:
+            url = base_url + "?" + "&".join(valid_params)
+        else:
+            url = base_url + "?sslmode=require"
+    return url
+
+DATABASE_URL = get_database_url()
 
 
 def get_db():
     """Maak een database connectie."""
-    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor, sslmode='require')
     return conn
 
 
