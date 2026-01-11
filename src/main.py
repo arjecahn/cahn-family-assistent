@@ -8,7 +8,7 @@ from typing import Optional
 
 from .task_engine import engine
 from .database import (
-    seed_initial_data, reset_tasks_2026, get_all_tasks,
+    seed_initial_data, reset_tasks_2026, update_task_targets, get_all_tasks,
     get_member_by_name, get_last_completion_for_member, delete_completion,
     migrate_add_cascade_delete, migrate_add_schedule_table
 )
@@ -135,6 +135,32 @@ async def reset_to_2026():
                 "karton_papier (1x/week per kind)",
                 "glas (1x/3 weken per kind)",
                 "koken (1x/3 weken per kind)"
+            ]
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/tasks/update-targets")
+async def update_targets():
+    """Update alleen de taak-frequenties ZONDER data te verwijderen.
+
+    Dit is veilig om te gebruiken - completions en schedule blijven behouden.
+    Alleen de weekly_target, per_child_target en rotation_weeks worden aangepast.
+    """
+    try:
+        update_task_targets()
+        return {
+            "status": "ok",
+            "message": "Taak-targets bijgewerkt (data behouden)",
+            "tasks": [
+                "uitruimen_ochtend: 3x/week totaal",
+                "uitruimen_avond: 7x/week totaal",
+                "inruimen: 7x/week totaal",
+                "dekken: 7x/week totaal",
+                "karton_papier: 2x/week totaal",
+                "glas: 1x/week totaal",
+                "koken: 1x/maand per kind"
             ]
         }
     except Exception as e:

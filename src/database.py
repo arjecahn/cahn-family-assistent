@@ -390,6 +390,43 @@ def reset_tasks_2026():
     print("Taken gereset naar 2026 configuratie!")
 
 
+def update_task_targets():
+    """Update alleen de taak-targets ZONDER completions te verwijderen.
+
+    Dit is veilig om te gebruiken wanneer je de frequenties wilt aanpassen
+    maar de bestaande voortgang wilt behouden.
+    """
+    if not DATABASE_URL:
+        print("Geen DATABASE_URL gevonden, skip update")
+        return
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Nieuwe targets (afspraken 2026)
+    updates = [
+        ("uitruimen_ochtend", 3, 1, 1),   # 3x/week totaal
+        ("uitruimen_avond", 7, 2, 1),     # 7x/week totaal (elke dag)
+        ("inruimen", 7, 2, 1),            # 7x/week totaal (elke dag)
+        ("dekken", 7, 2, 1),              # 7x/week totaal (elke dag)
+        ("karton_papier", 2, 1, 1),       # 2x/week totaal
+        ("glas", 1, 1, 1),                # 1x/week totaal
+        ("koken", 1, 1, 4),               # 1x/maand per kind
+    ]
+
+    for name, weekly_target, per_child, rotation in updates:
+        cur.execute("""
+            UPDATE tasks
+            SET weekly_target = %s, per_child_target = %s, rotation_weeks = %s
+            WHERE name = %s
+        """, (weekly_target, per_child, rotation, name))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    print("Taak-targets bijgewerkt!")
+
+
 # CRUD operaties voor Members
 def get_all_members() -> list[Member]:
     """Haal alle gezinsleden op."""
