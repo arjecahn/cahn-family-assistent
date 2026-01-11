@@ -1094,7 +1094,8 @@ class TaskEngine:
             else:
                 for day_task in day_tasks:
                     check = "✅" if day_task["completed"] else "⬜"
-                    name = day_task["assigned_to"][:6]  # Max 6 chars voor naam
+                    # Toon wie het DEED (completed_by) als af, anders wie GEPLAND staat
+                    name = (day_task.get("completed_by") or day_task["assigned_to"])[:6]
                     task_display = day_task["task_name"][:25]  # Max 25 chars voor taak
                     line = f"{check} {name}: {task_display}"
                     lines.append(f"║    {line:<46}║")
