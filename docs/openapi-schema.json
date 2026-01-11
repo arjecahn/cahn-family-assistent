@@ -1,0 +1,229 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Cahn Family Task API",
+    "description": "API voor de Cahn Family Task Assistant - eerlijke takenverdeling voor het gezin",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://cahn-family-assistent.vercel.app",
+      "description": "Production (Vercel)"
+    }
+  ],
+  "paths": {
+    "/api/suggest/{task_name}": {
+      "get": {
+        "operationId": "suggestForTask",
+        "summary": "Vraag wie aan de beurt is voor een taak",
+        "description": "Berekent op basis van eerlijke verdeling wie de taak zou moeten doen",
+        "parameters": [
+          {
+            "name": "task_name",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Naam van de taak: dekken, inruimen, uitruimen, karton, glas"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Suggestie wie de taak moet doen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "suggested": { "type": "string", "description": "Naam van gesuggereerd gezinslid" },
+                    "reason": { "type": "string", "description": "Uitleg waarom deze persoon aan de beurt is" },
+                    "scores": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": { "type": "string" },
+                          "total_this_week": { "type": "integer" },
+                          "score": { "type": "number" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/complete": {
+      "post": {
+        "operationId": "completeTask",
+        "summary": "Registreer dat iemand een taak heeft gedaan",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "member_name": {
+                    "type": "string",
+                    "description": "Naam: Nora, Linde of Fenna"
+                  },
+                  "task_name": {
+                    "type": "string",
+                    "description": "Taak: dekken, inruimen, uitruimen, etc."
+                  }
+                },
+                "required": ["member_name", "task_name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Taak succesvol geregistreerd",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "completion_id": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/summary": {
+      "get": {
+        "operationId": "getWeeklySummary",
+        "summary": "Haal het weekoverzicht op met taken per persoon",
+        "responses": {
+          "200": {
+            "description": "Overzicht van taken deze week",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "total": { "type": "integer" },
+                      "tasks": { "type": "object" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/absence": {
+      "post": {
+        "operationId": "registerAbsence",
+        "summary": "Registreer dat iemand afwezig is",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "member_name": { "type": "string" },
+                  "start_date": { "type": "string", "format": "date" },
+                  "end_date": { "type": "string", "format": "date" },
+                  "reason": { "type": "string" }
+                },
+                "required": ["member_name", "start_date", "end_date"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Afwezigheid geregistreerd"
+          }
+        }
+      }
+    },
+    "/api/swap/request": {
+      "post": {
+        "operationId": "requestSwap",
+        "summary": "Vraag een taakruil aan met een ander gezinslid",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "requester_name": { "type": "string" },
+                  "target_name": { "type": "string" },
+                  "task_name": { "type": "string" },
+                  "swap_date": { "type": "string", "format": "date" }
+                },
+                "required": ["requester_name", "target_name", "task_name", "swap_date"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ruil verzoek aangemaakt"
+          }
+        }
+      }
+    },
+    "/api/swap/respond": {
+      "post": {
+        "operationId": "respondToSwap",
+        "summary": "Accepteer of weiger een ruil verzoek",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "swap_id": { "type": "string" },
+                  "accept": { "type": "boolean" }
+                },
+                "required": ["swap_id", "accept"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ruil verzoek beantwoord"
+          }
+        }
+      }
+    },
+    "/api/swaps/pending/{member_name}": {
+      "get": {
+        "operationId": "getPendingSwaps",
+        "summary": "Haal openstaande ruil verzoeken op voor een gezinslid",
+        "parameters": [
+          {
+            "name": "member_name",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lijst met openstaande ruil verzoeken"
+          }
+        }
+      }
+    }
+  }
+}

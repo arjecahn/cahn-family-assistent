@@ -11,3 +11,4 @@ data/
 *.json
 !vercel.json
 !package.json
+!docs/*.json
