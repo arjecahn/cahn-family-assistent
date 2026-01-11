@@ -90,6 +90,7 @@ PostgreSQL via Supabase met automatische URL parsing voor Vercel compatibility.
 | `/api/tasks/reset-2026` | POST | Reset taken naar 2026 afspraken |
 | `/api/suggest/{task}` | GET | Wie moet deze taak doen? |
 | `/api/complete` | POST | Registreer voltooide taak |
+| `/api/undo` | POST | Maak laatste taak ongedaan |
 | `/api/summary` | GET | Weekoverzicht per persoon |
 | `/api/schedule` | GET | Weekrooster met ASCII/emoji overzicht |
 | `/api/absence` | POST | Registreer afwezigheid |

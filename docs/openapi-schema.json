@@ -207,6 +207,47 @@
         }
       }
     },
+    "/api/undo": {
+      "post": {
+        "operationId": "undoLastTask",
+        "summary": "Maak de laatst voltooide taak ongedaan",
+        "description": "Verwijdert de laatst geregistreerde taak voor een gezinslid. Handig als iemand per ongeluk de verkeerde taak heeft afgevinkt.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "member_name": {
+                    "type": "string",
+                    "description": "Naam van het gezinslid: Nora, Linde of Fenna"
+                  }
+                },
+                "required": ["member_name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resultaat van de undo actie",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "undone_task": { "type": "string", "description": "Naam van de ongedaan gemaakte taak (alleen bij success)" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/absence": {
       "post": {
         "operationId": "registerAbsence",

@@ -7,7 +7,10 @@ from pydantic import BaseModel
 from typing import Optional
 
 from .task_engine import engine
-from .database import seed_initial_data, reset_tasks_2026, get_all_tasks
+from .database import (
+    seed_initial_data, reset_tasks_2026, get_all_tasks,
+    get_member_by_name, get_last_completion_for_member, delete_completion
+)
 from .voice_handlers import handle_google_action
 
 app = FastAPI(
@@ -134,6 +137,10 @@ class SwapResponse(BaseModel):
     accept: bool
 
 
+class UndoRequest(BaseModel):
+    member_name: str
+
+
 @app.get("/api/suggest/{task_name}")
 async def suggest_for_task(task_name: str):
     """Suggereer wie een taak moet doen."""
@@ -167,6 +174,39 @@ async def complete_task(request: TaskCompletionRequest):
         }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/undo")
+async def undo_last_task(request: UndoRequest):
+    """Maak de laatst voltooide taak ongedaan voor een gezinslid.
+
+    Handig als iemand per ongeluk de verkeerde taak heeft afgevinkt.
+    """
+    member = get_member_by_name(request.member_name)
+    if not member:
+        raise HTTPException(status_code=404, detail=f"Gezinslid '{request.member_name}' niet gevonden")
+
+    last_completion = get_last_completion_for_member(member.id)
+    if not last_completion:
+        return {
+            "success": False,
+            "message": f"{request.member_name} heeft nog geen taken voltooid om ongedaan te maken"
+        }
+
+    task_name = last_completion.task_name
+    deleted = delete_completion(last_completion.id)
+
+    if deleted:
+        return {
+            "success": True,
+            "message": f"Ongedaan gemaakt: {task_name} van {request.member_name}",
+            "undone_task": task_name
+        }
+    else:
+        return {
+            "success": False,
+            "message": "Kon de taak niet ongedaan maken"
+        }
 
 
 @app.post("/api/absence")

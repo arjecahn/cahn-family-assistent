@@ -404,6 +404,37 @@ def get_last_completion_for_task(member_id: str, task_id: str) -> Optional[Compl
     return None
 
 
+def get_last_completion_for_member(member_id: str) -> Optional[Completion]:
+    """Haal de laatst voltooide taak op voor een lid (voor undo)."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, task_id, member_id, member_name, task_name, completed_at, week_number
+        FROM completions WHERE member_id = %s
+        ORDER BY completed_at DESC LIMIT 1
+    """, (int(member_id),))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if row:
+        return Completion(id=str(row["id"]), task_id=str(row["task_id"]), member_id=str(row["member_id"]),
+                         member_name=row["member_name"], task_name=row["task_name"],
+                         completed_at=row["completed_at"], week_number=row["week_number"])
+    return None
+
+
+def delete_completion(completion_id: str) -> bool:
+    """Verwijder een voltooide taak (undo)."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM completions WHERE id = %s", (int(completion_id),))
+    deleted = cur.rowcount > 0
+    conn.commit()
+    cur.close()
+    conn.close()
+    return deleted
+
+
 # CRUD operaties voor Absences
 def get_absence_for_date(member_id: str, check_date: date) -> Optional[Absence]:
     """Check of een lid afwezig is op een bepaalde datum."""
