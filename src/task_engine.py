@@ -1,7 +1,9 @@
 """Core logica voor eerlijke takenverdeling."""
+import random
 from datetime import date, datetime, timedelta
 from typing import Optional
 from dataclasses import dataclass
+from collections import defaultdict
 
 from .models import Member, Task, Completion, ScheduleAssignment, MissedTask
 from . import database as db
@@ -28,6 +30,17 @@ TASK_MIN_SPACING = {
 
 # Maximum aantal taken per dag (harde limiet)
 MAX_TASKS_PER_DAY = 5
+
+# Taken die NIET gecompenseerd worden bij afwezigheid
+# (maaltijd-gerelateerd - als je niet eet, hoef je ook niet te helpen)
+MEAL_RELATED_TASKS = {
+    "dekken", "inruimen", "uitruimen_avond", "uitruimen_ochtend",
+    "uitruimen voor school", "uitruimen avond"
+}
+
+# Taken die WEL gecompenseerd worden bij afwezigheid
+# (huishoudelijke taken die onafhankelijk van maaltijden zijn)
+HOUSEHOLD_TASKS = {"karton_papier", "glas", "koken"}
 
 # Taken die meerdere tijdslots blokkeren (bijv. koken blokkeert avond + middag)
 TASK_BLOCKS_SLOTS = {
@@ -113,13 +126,15 @@ class TaskEngine:
         Lagere score = meer aan de beurt.
 
         Weging:
-        - 50%: Totaal aantal taken deze week
-        - 30%: Aantal keer deze specifieke taak gedaan
-        - 20%: Hoe lang geleden deze taak gedaan (recency)
+        - 35%: Totaal aantal taken deze week
+        - 25%: Aantal keer deze specifieke taak gedaan
+        - 25%: Fairness balance (long-term debt/credit)
+        - 15%: Hoe lang geleden deze taak gedaan (recency)
         """
         total_tasks = self.get_task_count_this_week(member)
         specific_tasks = self.get_task_count_this_week(member, task)
         last_did = self.get_last_completion(member, task)
+        fairness_balance = db.get_fairness_balance(member.id)
 
         # Normaliseer scores relatief aan andere beschikbare leden
         max_total = max(self.get_task_count_this_week(m) for m in available_members) or 1
@@ -132,10 +147,16 @@ class TaskEngine:
         else:
             recency_score = 1.0
 
+        # Fairness balance normalisatie (-10 tot +10 typisch bereik)
+        # Positief balance = schuld = zou LAGERE score moeten krijgen (eerder aan beurt)
+        # We normaliseren naar range -1 tot +1 en inverteren
+        fairness_score = max(-1.0, min(1.0, fairness_balance / 10.0))
+
         weighted = (
-            (total_tasks / max_total) * 0.5 +
-            (specific_tasks / max_specific) * 0.3 +
-            (1 - recency_score) * 0.2
+            (total_tasks / max_total) * 0.35 +
+            (specific_tasks / max_specific) * 0.25 +
+            (-fairness_score) * 0.25 +  # Negatief omdat hogere schuld = lagere score
+            (1 - recency_score) * 0.15
         )
 
         return weighted
@@ -683,18 +704,70 @@ class TaskEngine:
         end: date,
         reason: Optional[str] = None
     ):
-        """Registreer afwezigheid van een gezinslid."""
+        """Registreer afwezigheid van een gezinslid.
+
+        Berekent automatisch fairness compensatie voor de siblings:
+        - Maaltijd-taken (dekken, in/uitruimen): GEEN compensatie (afwezige eet niet mee)
+        - Huishoudelijke taken (karton, glas, koken): WEL compensatie (moet toch gedaan worden)
+        """
         member = db.get_member_by_name(member_name)
         if not member:
             raise ValueError(f"Gezinslid '{member_name}' niet gevonden")
 
-        return db.add_absence({
+        absence = db.add_absence({
             "member_id": member.id,
             "member_name": member.name,
             "start_date": start,
             "end_date": end,
             "reason": reason
         })
+
+        # Bereken en pas fairness compensatie toe
+        self._calculate_absence_compensation(member, start, end)
+
+        return absence
+
+    def _calculate_absence_compensation(self, absent_member: Member, start: date, end: date):
+        """Bereken fairness compensatie wanneer iemand afwezig is.
+
+        ALLEEN voor huishoudelijke taken (karton, glas, koken), NIET voor maaltijd-taken.
+
+        Logica:
+        - Huishoudelijke taken moeten nog steeds gedaan worden
+        - De siblings moeten dit overnemen
+        - Afwezige krijgt "schuld" (positieve balance)
+        - Siblings krijgen "tegoed" (negatieve balance)
+        """
+        all_members = db.get_all_members()
+        siblings = [m for m in all_members if m.id != absent_member.id]
+
+        if not siblings:
+            return  # Niemand om te compenseren
+
+        # Bereken aantal dagen afwezigheid
+        absence_days = (end - start).days + 1
+
+        # Huishoudelijke taken per week (niet maaltijd-gerelateerd):
+        # - karton_papier: 2x/week totaal = 0.67/persoon
+        # - glas: 1x/week totaal = 0.33/persoon
+        # - koken: 1x/week totaal = 0.33/persoon
+        # Totaal: ~1.33 taken per persoon per week = 0.19 per dag
+
+        # Bij afwezigheid van 1 persoon moeten 2 personen dit delen:
+        # Extra per sibling: 0.19 / 2 = ~0.095 taken per dag
+        extra_per_sibling_per_day = 0.1  # Afgerond
+
+        total_extra_per_sibling = extra_per_sibling_per_day * absence_days
+
+        # Update fairness balances
+        for sibling in siblings:
+            # Siblings doen extra werk = krijgen tegoed (negatieve balance)
+            db.update_fairness_balance(sibling.id, -total_extra_per_sibling)
+
+        # Afwezige heeft schuld = moet meer doen bij terugkomst (positieve balance)
+        # De schuld is het totaal dat de siblings samen extra doen
+        total_sibling_work = total_extra_per_sibling * len(siblings)
+        db.update_fairness_balance(absent_member.id, total_sibling_work)
 
     def get_weekly_summary(self) -> dict:
         """Geef een overzicht van de taken deze week."""
@@ -1359,6 +1432,7 @@ class TaskEngine:
         De verdeling houdt rekening met:
         - Hoeveel taken iemand deze WEEK al heeft
         - Hoeveel taken iemand deze MAAND al heeft (voor eerlijkheid over langere termijn)
+        - Fairness balance (langetermijn schuld/tegoed)
         """
         schedule = {}
         assignments_to_save = []
@@ -1385,6 +1459,9 @@ class TaskEngine:
         # Track welke tijdslots al bezet zijn per dag per persoon
         # Format: {day_idx: {member_name: set(time_slots)}}
         member_day_slots = {day_idx: {m.name: set() for m in members} for day_idx in range(7)}
+
+        # Haal fairness balances op (eenmalig voor hele schedule generatie)
+        fairness_balances = db.get_all_fairness_balances()
 
         # Bepaal voor elke taak op welke dagen deze moet worden gedaan
         task_days = self._distribute_tasks_over_week(tasks, day_availability)
@@ -1433,10 +1510,11 @@ class TaskEngine:
                         })
                 else:
                     # Kies beschikbare persoon met minste taken EN beschikbare tijdslot
-                    # Nu ook met maandelijkse balancering per taaktype
+                    # Nu ook met maandelijkse balancering per taaktype en fairness balance
                     assigned = self._select_member_for_task(
                         task, available_members, member_week_counts, member_day_slots[day_idx],
-                        member_month_task_counts=member_month_task_counts
+                        member_month_task_counts=member_month_task_counts,
+                        fairness_balances=fairness_balances
                     )
 
                     if assigned:
@@ -1492,13 +1570,16 @@ class TaskEngine:
 
     def _select_member_for_task(self, task: Task, available_members: list,
                                    member_week_counts: dict, member_day_slots: dict,
-                                   member_month_task_counts: dict = None) -> Optional[Member]:
+                                   member_month_task_counts: dict = None,
+                                   fairness_balances: dict = None) -> Optional[Member]:
         """Selecteer het beste lid voor een taak.
 
         Selectiecriteria (in volgorde van prioriteit):
         1. Tijdslot moet vrij zijn (STRIKT - geen fallback!)
         2. Minste keer deze specifieke taak gedaan deze MAAND (eerlijke verdeling)
         3. Minste taken deze WEEK (als maand gelijk is)
+        4. Fairness balance (long-term debt/credit)
+        5. Random tie-breaker (prevents first-pick bias!)
         """
         time_slot = task.time_of_day
         task_name = task.display_name
@@ -1513,18 +1594,37 @@ class TaskEngine:
         if not eligible:
             return None  # Niemand beschikbaar - taak kan niet op deze dag
 
+        # Haal fairness balances op als niet meegegeven
+        if fairness_balances is None:
+            fairness_balances = db.get_all_fairness_balances()
+
         # Sorteer op:
         # 1. Maandelijkse count voor DEZE TAAK (primair - voor eerlijke verdeling per taaktype)
         # 2. Wekelijkse totaal (secundair - voor eerlijke verdeling binnen de week)
+        # 3. Fairness balance (positief = schuld = lagere score = eerder aan beurt)
         def sort_key(m):
             month_task_count = 0
             if member_month_task_counts and m.name in member_month_task_counts:
                 month_task_count = member_month_task_counts[m.name].get(task_name, 0)
             week_count = member_week_counts.get(m.name, 0)
-            return (month_task_count, week_count)
+            # Fairness: positief balance = schuld = zou MEER moeten doen
+            # Dus: negate voor sortering (hogere schuld = lagere waarde = eerder in lijst)
+            fairness = -fairness_balances.get(m.name, 0)
+            return (month_task_count, week_count, fairness)
 
-        sorted_eligible = sorted(eligible, key=sort_key)
-        return sorted_eligible[0]
+        # Group by equal scores and randomize within groups
+        score_groups = defaultdict(list)
+        for m in eligible:
+            score = sort_key(m)
+            score_groups[score].append(m)
+
+        # Get the lowest score (best candidates)
+        min_score = min(score_groups.keys())
+        best_candidates = score_groups[min_score]
+
+        # RANDOM selection among equally-scored candidates
+        # This eliminates first-pick bias!
+        return random.choice(best_candidates)
 
     def _count_member_tasks(self, schedule: dict, members: list) -> dict:
         """Tel hoeveel taken per lid deze week.
@@ -1798,6 +1898,26 @@ class TaskEngine:
             linde = f"{stats['Linde']['done']}/{stats['Linde']['target']}"
             fenna = f"{stats['Fenna']['done']}/{stats['Fenna']['target']}"
             lines.append(f"║  {short_name:<16} {nora:>5} {linde:>5} {fenna:>5}              ║")
+
+        # Fairness balance sectie
+        fairness_balances = db.get_all_fairness_balances()
+        if any(abs(b) > 0.3 for b in fairness_balances.values()):
+            lines.append("║───────────────────────────────────────────────────║")
+            lines.append("║  ⚖️  EERLIJKHEIDSBALANS                            ║")
+            for name in ["Nora", "Linde", "Fenna"]:
+                balance = fairness_balances.get(name, 0)
+                if balance > 0.5:
+                    # Schuld - moet meer doen
+                    indicator = f"📉 {balance:+.1f}"
+                    status = "(schuld)"
+                elif balance < -0.5:
+                    # Tegoed - heeft extra gedaan
+                    indicator = f"📈 {balance:+.1f}"
+                    status = "(tegoed)"
+                else:
+                    indicator = f"   {balance:+.1f}"
+                    status = "(ok)"
+                lines.append(f"║    {name:<8} {indicator:<10} {status:<20}   ║")
 
         lines.append("╚═══════════════════════════════════════════════════╝")
 
