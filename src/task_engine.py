@@ -1418,6 +1418,7 @@ class TaskEngine:
                         "task_name": task.display_name,
                         "assigned_to": done_by,
                         "completed": True,
+                        "completed_by": done_by,  # Nodig voor _count_member_tasks
                         "time_of_day": task.time_of_day
                     })
                     # Ook opslaan in assignments (als record)
@@ -1529,7 +1530,7 @@ class TaskEngine:
         """Tel hoeveel taken per lid deze week.
 
         Telt correct:
-        - Voltooide taken: telt voor wie het DEED (completed_by)
+        - Voltooide taken: telt voor wie het DEED (completed_by of assigned_to)
         - Nog te doen taken: telt voor wie GEPLAND staat (assigned_to)
         - Gemiste taken: telt NIET (worden apart herplant)
         """
@@ -1541,8 +1542,8 @@ class TaskEngine:
                     continue
 
                 if task_info.get("completed"):
-                    # Voltooide taak: tel voor wie het DEED
-                    name = task_info.get("completed_by")
+                    # Voltooide taak: tel voor wie het DEED (completed_by of assigned_to als fallback)
+                    name = task_info.get("completed_by") or task_info.get("assigned_to")
                 else:
                     # Nog te doen: tel voor wie gepland staat
                     name = task_info.get("assigned_to")
