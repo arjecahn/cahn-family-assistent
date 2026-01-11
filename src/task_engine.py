@@ -581,16 +581,16 @@ class TaskEngine:
                 absent_str = ", ".join(absent)
                 lines.append(f"║    🚫 Afwezig: {absent_str:<33}║")
 
-            tasks = day_data["tasks"]
-            if not tasks:
+            day_tasks = day_data["tasks"]
+            if not day_tasks:
                 if not absent:
                     lines.append("║    (geen taken gepland)                           ║")
             else:
-                for task in tasks:
-                    check = "✅" if task["completed"] else "⬜"
-                    name = task["assigned_to"][:6]  # Max 6 chars voor naam
-                    task_name = task["task_name"][:25]  # Max 25 chars voor taak
-                    line = f"{check} {name}: {task_name}"
+                for day_task in day_tasks:
+                    check = "✅" if day_task["completed"] else "⬜"
+                    name = day_task["assigned_to"][:6]  # Max 6 chars voor naam
+                    task_display = day_task["task_name"][:25]  # Max 25 chars voor taak
+                    line = f"{check} {name}: {task_display}"
                     lines.append(f"║    {line:<46}║")
 
             if day_idx < 6:
