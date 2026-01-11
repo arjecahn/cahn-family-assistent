@@ -273,7 +273,13 @@ class TaskEngine:
 
     def get_week_schedule(self) -> dict:
         """
-        Genereer een weekrooster met wie wat moet doen per dag.
+        Genereer een flexibel weekrooster met wie wat moet doen per dag.
+
+        De planning is volledig flexibel:
+        - Taken worden verdeeld op basis van aanwezigheid
+        - Geen vaste dagen voor specifieke taken
+        - Eerlijke verdeling over beschikbare personen
+        - Zondag telt ook mee
 
         Returns een dict met:
         - schedule: per dag een lijst van taken met toegewezen persoon
@@ -302,59 +308,39 @@ class TaskEngine:
                 "tasks": []
             }
 
-        # Verdeel taken over de week met eerlijke verdeling per dag
-        # Per dag: wijs taken toe met round-robin over de kinderen
-        daily_assignments = {day: [] for day in DAY_NAMES}
+        # Bepaal per dag wie beschikbaar is (rekening houdend met afwezigheden)
+        day_availability = {}
+        for day_idx in range(7):
+            day_date = week_start + timedelta(days=day_idx)
+            day_name = DAY_NAMES[day_idx]
+            available = [m for m in members if self.is_member_available(m, day_date)]
+            day_availability[day_name] = available
 
-        # Track hoeveel taken per persoon per week
+        # Track hoeveel taken per persoon per week (inclusief al gedane taken)
         member_week_counts = {m.name: 0 for m in members}
         for c in all_completions:
             if c.member_name in member_week_counts:
                 member_week_counts[c.member_name] += 1
 
-        # Per dag een aparte teller voor eerlijke verdeling binnen de dag
+        # Verdeel taken flexibel over de week
+        # Stap 1: Bepaal voor elke taak op welke dagen deze moet worden gedaan
+        task_days = self._distribute_tasks_over_week(tasks, day_availability)
+
+        # Stap 2: Wijs taken toe aan beschikbare personen per dag
+        daily_assignments = {day: [] for day in DAY_NAMES}
+
         for day_idx in range(7):
             day_name = DAY_NAMES[day_idx]
             day_date = week_start + timedelta(days=day_idx)
-            is_weekday = day_idx < 5  # ma-vr
-            is_weekend = day_idx >= 5  # za-zo
+            available_members = day_availability[day_name]
 
-            # Bepaal welke taken vandaag gedaan moeten worden
-            today_tasks = []
+            if not available_members:
+                continue  # Niemand beschikbaar vandaag
 
-            for task in tasks:
-                # Speciale behandeling voor koken (1x per week, zaterdag)
-                if task.name == "koken":
-                    if day_idx == 5:  # zaterdag
-                        today_tasks.append(task)
-                    continue
+            # Welke taken zijn vandaag gepland?
+            today_tasks = [t for t in tasks if day_idx in task_days.get(t.name, [])]
 
-                # Ochtendtaken: alleen schooldagen (ma-vr), elk kind 1x per week
-                if task.time_of_day == "ochtend" and is_weekday:
-                    # Ochtend uitruimen: 3x per week = ma, wo, vr
-                    if day_idx in [0, 2, 4]:  # ma, wo, vr
-                        today_tasks.append(task)
-
-                # Avondtaken: ma-za (6 dagen), niet op zondag
-                elif task.time_of_day == "avond" and day_idx < 6:
-                    today_tasks.append(task)
-
-                # Middagtaken (karton, glas): verspreid over de week
-                elif task.time_of_day == "middag":
-                    if task.name == "karton_papier":
-                        # 3x per week: di, do, za
-                        if day_idx in [1, 3, 5]:
-                            today_tasks.append(task)
-                    elif task.name == "glas":
-                        # 1x per week: zaterdag
-                        if day_idx == 5:
-                            today_tasks.append(task)
-
-            # Wijs taken toe aan leden voor vandaag (round-robin)
-            # Sorteer op totaal aantal taken deze week
-            sorted_members = sorted(members, key=lambda m: member_week_counts[m.name])
-            member_idx = 0
-
+            # Sorteer beschikbare leden op aantal taken (minste eerst)
             for task in today_tasks:
                 # Check of deze taak al is gedaan vandaag
                 already_done = False
@@ -374,10 +360,13 @@ class TaskEngine:
                         "time_of_day": task.time_of_day
                     })
                 else:
-                    # Round-robin: volgende persoon in de rij
-                    assigned = sorted_members[member_idx % len(sorted_members)]
+                    # Kies de beschikbare persoon met minste taken
+                    sorted_available = sorted(
+                        available_members,
+                        key=lambda m: member_week_counts[m.name]
+                    )
+                    assigned = sorted_available[0]
                     member_week_counts[assigned.name] += 1
-                    member_idx += 1
 
                     daily_assignments[day_name].append({
                         "task_name": task.display_name,
@@ -393,17 +382,63 @@ class TaskEngine:
             schedule[day_name]["tasks"] = daily_assignments[day_name]
 
         # Genereer ASCII/emoji overzicht
-        ascii_overview = self._generate_ascii_schedule(schedule, week_start)
+        ascii_overview = self._generate_ascii_schedule(schedule, week_start, day_availability, member_week_counts)
 
         return {
             "week_number": week_number,
             "week_start": week_start.isoformat(),
             "schedule": schedule,
             "ascii_overview": ascii_overview,
-            "member_totals": member_week_counts
+            "member_totals": member_week_counts,
+            "day_availability": {day: [m.name for m in members] for day, members in day_availability.items()}
         }
 
-    def _generate_ascii_schedule(self, schedule: dict, week_start: date) -> str:
+    def _distribute_tasks_over_week(self, tasks: list, day_availability: dict) -> dict:
+        """
+        Verdeel taken flexibel over de week.
+
+        Regels:
+        - Taken worden verdeeld op basis van weekly_target
+        - Voorkeur voor dagen waar mensen beschikbaar zijn
+        - Spreiding over de week voor afwisseling
+        """
+        task_days = {}
+
+        for task in tasks:
+            target = task.weekly_target
+            task_days[task.name] = []
+
+            if target <= 0:
+                continue
+
+            # Bepaal geschikte dagen (waar minstens 1 persoon beschikbaar is)
+            suitable_days = []
+            for day_idx, day_name in enumerate(DAY_NAMES):
+                if day_availability[day_name]:  # Er is iemand beschikbaar
+                    suitable_days.append(day_idx)
+
+            if not suitable_days:
+                continue
+
+            # Verdeel taken gelijkmatig over beschikbare dagen
+            if target >= len(suitable_days):
+                # Taak moet (bijna) elke dag: gebruik alle beschikbare dagen
+                task_days[task.name] = suitable_days[:target]
+            else:
+                # Verspreid taken zo goed mogelijk
+                # Bijv. 3 taken over 7 dagen: dag 0, 2, 4 of 1, 3, 5 etc.
+                step = len(suitable_days) / target
+                selected = []
+                for i in range(target):
+                    idx = int(i * step)
+                    if idx < len(suitable_days):
+                        selected.append(suitable_days[idx])
+                task_days[task.name] = selected
+
+        return task_days
+
+    def _generate_ascii_schedule(self, schedule: dict, week_start: date,
+                                   day_availability: dict, member_totals: dict) -> str:
         """Genereer een ASCII/emoji weekoverzicht."""
         lines = []
 
@@ -414,11 +449,13 @@ class TaskEngine:
         lines.append("╠═══════════════════════════════════════════════════╣")
 
         today = date.today()
+        all_members = db.get_all_members()
 
         for day_idx, day_name in enumerate(DAY_NAMES):
             day_data = schedule[day_name]
             day_date = week_start + timedelta(days=day_idx)
             emoji = day_data["emoji"]
+            available = day_availability.get(day_name, [])
 
             # Markeer vandaag
             if day_date == today:
@@ -431,9 +468,16 @@ class TaskEngine:
             header = f"{day_marker}{emoji} {day_name.upper():<9} ({date_str})"
             lines.append(f"║ {header:<48}║")
 
+            # Toon afwezigen als er iemand niet beschikbaar is
+            absent = [m.name for m in all_members if m not in available]
+            if absent:
+                absent_str = ", ".join(absent)
+                lines.append(f"║    🚫 Afwezig: {absent_str:<33}║")
+
             tasks = day_data["tasks"]
             if not tasks:
-                lines.append("║    (vrij)                                         ║")
+                if not absent:
+                    lines.append("║    (geen taken gepland)                           ║")
             else:
                 for task in tasks:
                     check = "✅" if task["completed"] else "⬜"
@@ -444,6 +488,13 @@ class TaskEngine:
 
             if day_idx < 6:
                 lines.append("║───────────────────────────────────────────────────║")
+
+        # Totaal overzicht
+        lines.append("╠═══════════════════════════════════════════════════╣")
+        lines.append("║  📊 STAND DEZE WEEK                               ║")
+        for name, count in sorted(member_totals.items()):
+            bar = "█" * min(count, 20)
+            lines.append(f"║    {name:<6}: {bar:<20} ({count})           ║")
 
         lines.append("╚═══════════════════════════════════════════════════╝")
 
