@@ -7,8 +7,14 @@ from psycopg2.extras import RealDictCursor
 
 from .models import Member, Task, Completion, Absence, Swap
 
-# Database URL van Vercel (automatisch beschikbaar als POSTGRES_URL)
-DATABASE_URL = os.getenv("POSTGRES_URL", os.getenv("DATABASE_URL", ""))
+# Database URL - Supabase/Vercel zetten verschillende variabelen
+DATABASE_URL = (
+    os.getenv("POSTGRES_URL") or
+    os.getenv("DATABASE_URL") or
+    os.getenv("SUPABASE_DB_URL") or
+    os.getenv("POSTGRES_URL_NON_POOLING") or
+    ""
+)
 
 
 def get_db():

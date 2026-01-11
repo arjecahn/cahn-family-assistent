@@ -42,7 +42,10 @@ async def verify_api_key(authorization: Optional[str] = Header(None)):
 @app.on_event("startup")
 async def startup():
     """Initialize database on startup."""
-    seed_initial_data()
+    try:
+        seed_initial_data()
+    except Exception as e:
+        print(f"Database init error (might be OK on first run): {e}")
 
 
 # Health check
