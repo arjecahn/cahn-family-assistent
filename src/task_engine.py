@@ -371,7 +371,8 @@ class TaskEngine:
                 done_by = None
 
                 for c in all_completions:
-                    if c.task_id == task.id and c.completed_at.date() == day_date:
+                    # Vergelijk op task_name want task_id kan veranderen na reset
+                    if c.task_name == task.display_name and c.completed_at.date() == day_date:
                         already_done = True
                         done_by = c.member_name
                         break
