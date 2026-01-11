@@ -323,6 +323,12 @@ class TaskEngine:
             today_tasks = []
 
             for task in tasks:
+                # Speciale behandeling voor koken (1x per week, zaterdag)
+                if task.name == "koken":
+                    if day_idx == 5:  # zaterdag
+                        today_tasks.append(task)
+                    continue
+
                 # Ochtendtaken: alleen schooldagen (ma-vr), elk kind 1x per week
                 if task.time_of_day == "ochtend" and is_weekday:
                     # Ochtend uitruimen: 3x per week = ma, wo, vr
@@ -340,10 +346,6 @@ class TaskEngine:
                         if day_idx in [1, 3, 5]:
                             today_tasks.append(task)
                     elif task.name == "glas":
-                        # 1x per week: zaterdag
-                        if day_idx == 5:
-                            today_tasks.append(task)
-                    elif task.name == "koken":
                         # 1x per week: zaterdag
                         if day_idx == 5:
                             today_tasks.append(task)
