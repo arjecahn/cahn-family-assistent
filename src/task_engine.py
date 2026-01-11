@@ -1399,6 +1399,9 @@ class TaskEngine:
 
             today_tasks = [t for t in tasks if day_idx in task_days.get(t.name, [])]
 
+            # Track welke taken vandaag al verwerkt zijn (door scheduled tasks)
+            matched_task_names = set()
+
             for task in today_tasks:
                 # Check of al gedaan vandaag
                 already_done = False
@@ -1407,6 +1410,7 @@ class TaskEngine:
                     if c.task_name == task.display_name and c.completed_at.date() == day_date:
                         already_done = True
                         done_by = c.member_name
+                        matched_task_names.add(task.display_name)
                         break
 
                 if already_done:
@@ -1454,6 +1458,29 @@ class TaskEngine:
                             "member_id": assigned.id,
                             "member_name": assigned.name
                         })
+
+            # Voeg "extra" completions toe - taken die gedaan zijn maar niet gepland waren voor vandaag
+            # Dit zorgt ervoor dat alle gedane taken meetellen, ook na regenerate
+            tasks_lookup = {t.display_name: t for t in tasks}
+            for c in completions:
+                if c.completed_at.date() != day_date:
+                    continue
+                if c.task_name in matched_task_names:
+                    continue  # Al verwerkt via scheduled task
+
+                # Dit is een extra completion - taak was niet gepland voor vandaag
+                task = tasks_lookup.get(c.task_name)
+                time_of_day = task.time_of_day if task else "avond"
+
+                schedule[day_name]["tasks"].append({
+                    "task_name": c.task_name,
+                    "assigned_to": c.member_name,
+                    "completed": True,
+                    "completed_by": c.member_name,
+                    "time_of_day": time_of_day,
+                    "extra": True  # Markeer als extra (niet gepland)
+                })
+                matched_task_names.add(c.task_name)
 
         # Sorteer taken per dag op time_of_day
         time_order = {"ochtend": 0, "middag": 1, "avond": 2}
