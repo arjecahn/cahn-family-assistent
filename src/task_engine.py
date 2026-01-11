@@ -1139,53 +1139,12 @@ class TaskEngine:
                     rescheduled = True
                     break
 
-            # Als niet herplant kon worden voor originele persoon, probeer andere leden
+            # Als niet herplant kon worden voor originele persoon, LAAT VERVALLEN
+            # (gemiste taken die niet kunnen worden herplant door de regels komen te vervallen)
             if not rescheduled:
-                for target_day_idx in range(max(0, today_idx), 7):
-                    target_day_name = DAY_NAMES[target_day_idx]
-                    available = day_availability.get(target_day_name, [])
-
-                    # Check taak-specifieke regels (weekday-only, spacing)
-                    if not is_valid_day_for_task(task_name, target_day_idx, task):
-                        continue
-
-                    for m in available:
-                        if time_slot not in member_day_slots[target_day_idx].get(m.name, set()):
-                            # Herplan naar deze persoon
-                            schedule[target_day_name]["tasks"].append({
-                                "task_name": task_name,
-                                "assigned_to": m.name,
-                                "completed": False,
-                                "completed_by": None,
-                                "time_of_day": time_slot,
-                                "extra": False,
-                                "missed": False,
-                                "rescheduled_from": missed["original_day"]
-                            })
-                            member_day_slots[target_day_idx][m.name].add(time_slot)
-                            # Update task scheduling tracking
-                            if task_name not in task_scheduled_days:
-                                task_scheduled_days[task_name] = []
-                            task_scheduled_days[task_name].append(target_day_idx)
-
-                            try:
-                                db.add_assignment(
-                                    week_number=week_number,
-                                    year=year,
-                                    day_of_week=target_day_idx,
-                                    task_id=task.id,
-                                    task_name=task_name,
-                                    member_id=m.id,
-                                    member_name=m.name
-                                )
-                            except Exception:
-                                pass
-
-                            rescheduled = True
-                            break
-
-                    if rescheduled:
-                        break
+                # Taak kan niet worden herplant - markeer als definitief gemist
+                # Door niets te doen, blijft de taak alleen zichtbaar als ❌ op de originele dag
+                pass
 
         # Sorteer taken per dag op time_of_day
         time_order = {"ochtend": 0, "middag": 1, "avond": 2}
@@ -1465,6 +1424,7 @@ class TaskEngine:
         - Taken met lagere targets worden verspreid over verschillende dagen
         - Weekday-only taken (uitruimen_ochtend) alleen ma-vr
         - Spacing rules voor karton/glas (minstens X dagen ertussen)
+        - BALANCERING: taken worden zo gelijk mogelijk verdeeld over dagen
         """
         task_days = {}
 
@@ -1473,6 +1433,10 @@ class TaskEngine:
 
         # Track hoeveel taken per dag al zijn toegewezen (voor balans)
         day_task_count = {day_idx: 0 for day_idx in range(7)}
+
+        # Bereken ideale taken per dag (totaal / 7 dagen)
+        total_weekly_tasks = sum(t.weekly_target for t in tasks)
+        ideal_per_day = total_weekly_tasks / 7
 
         for task in sorted_tasks:
             target = task.weekly_target
@@ -1512,31 +1476,28 @@ class TaskEngine:
                 for day_idx in selected:
                     day_task_count[day_idx] += 1
             else:
-                # Verspreid taken zo goed mogelijk met voorkeur voor minst belaste dagen
+                # Verspreid taken zo goed mogelijk met STERKE voorkeur voor minst belaste dagen
                 selected = []
 
                 if min_spacing:
-                    # Gebruik spacing-aware selectie
+                    # Gebruik spacing-aware selectie met load balancing
                     selected = self._select_days_with_spacing(suitable_days, target, min_spacing, day_task_count)
                 else:
-                    # Standaard selectie: verspreid over de week
-                    step = len(suitable_days) / target
-
+                    # Balancerende selectie: kies steeds de dag met minste taken
                     for i in range(target):
-                        # Bereken ideale positie in de week
-                        ideal_pos = i * step
-                        # Vind de dag dichtstbij ideale positie die nog niet gekozen is
                         best_day = None
                         best_score = float('inf')
 
                         for day_idx in suitable_days:
                             if day_idx in selected:
                                 continue
-                            # Score = afstand van ideale positie + belasting penalty
-                            pos_in_suitable = suitable_days.index(day_idx)
-                            distance = abs(pos_in_suitable - ideal_pos)
-                            load_penalty = day_task_count[day_idx] * 0.5
-                            score = distance + load_penalty
+
+                            # Score gebaseerd op huidige belasting vs ideaal
+                            current_load = day_task_count[day_idx]
+                            # Hoe verder boven ideaal, hoe hoger de penalty
+                            load_penalty = max(0, current_load - ideal_per_day) * 2
+                            # Basis score is gewoon de huidige load
+                            score = current_load + load_penalty
 
                             if score < best_score:
                                 best_score = score
@@ -1552,7 +1513,7 @@ class TaskEngine:
 
     def _select_days_with_spacing(self, suitable_days: list, target: int,
                                     min_spacing: int, day_task_count: dict = None) -> list:
-        """Selecteer dagen met minimale spacing ertussen.
+        """Selecteer dagen met minimale spacing ertussen EN load balancing.
 
         Args:
             suitable_days: Lijst van geschikte dag-indices
@@ -1568,10 +1529,13 @@ class TaskEngine:
 
         selected = []
 
-        # Sorteer op dag-index voor logische volgorde
-        sorted_days = sorted(suitable_days)
+        # Sorteer op load (minste taken eerst) als we day_task_count hebben
+        if day_task_count:
+            sorted_days = sorted(suitable_days, key=lambda d: day_task_count.get(d, 0))
+        else:
+            sorted_days = sorted(suitable_days)
 
-        # Greedy selectie met spacing check
+        # Greedy selectie met spacing check, voorkeur voor minst belaste dagen
         for day_idx in sorted_days:
             if len(selected) >= target:
                 break
@@ -1587,23 +1551,7 @@ class TaskEngine:
                 selected.append(day_idx)
 
         # Als we niet genoeg dagen konden selecteren met spacing,
-        # probeer met relaxte spacing (half zo streng)
-        if len(selected) < target and min_spacing > 1:
-            relaxed_spacing = max(1, min_spacing // 2)
-            selected = []
-            for day_idx in sorted_days:
-                if len(selected) >= target:
-                    break
-
-                valid = True
-                for selected_day in selected:
-                    if abs(day_idx - selected_day) < relaxed_spacing:
-                        valid = False
-                        break
-
-                if valid:
-                    selected.append(day_idx)
-
+        # accepteer wat we hebben (niet relaxen - regels zijn regels)
         return sorted(selected)
 
     def _generate_ascii_schedule(self, schedule: dict, week_start: date,
