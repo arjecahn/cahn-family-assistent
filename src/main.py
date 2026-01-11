@@ -308,7 +308,11 @@ async def week_schedule():
     Dit toont per dag wie welke taken moet doen, met afvinkbare checkboxes.
     Gebruik dit om het rooster te tonen aan de kinderen.
     """
-    return engine.get_week_schedule()
+    try:
+        return engine.get_week_schedule()
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
 
 
 @app.post("/api/swap/request")
