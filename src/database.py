@@ -154,6 +154,19 @@ def init_db():
         )
     """)
 
+    # Fairness balance - langetermijn eerlijkheid bijhouden
+    # Positief = kind heeft schuld (moet meer doen)
+    # Negatief = kind heeft tegoed (heeft extra gedaan)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS fairness_balance (
+            id SERIAL PRIMARY KEY,
+            member_id INTEGER REFERENCES members(id) ON DELETE CASCADE UNIQUE,
+            member_name VARCHAR(50),
+            balance FLOAT DEFAULT 0.0,
+            last_updated TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()
     cur.close()
     conn.close()
@@ -1335,3 +1348,211 @@ def get_missed_tasks_for_member(member_id: str, limit: int = 20) -> list[MissedT
         expired=r["expired"],
         created_at=r["created_at"]
     ) for r in rows]
+
+
+# CRUD operaties voor Fairness Balance
+
+def migrate_add_fairness_balance_table():
+    """Migratie: voeg fairness_balance tabel toe aan bestaande database.
+
+    Veilig om meerdere keren uit te voeren.
+    """
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS fairness_balance (
+                id SERIAL PRIMARY KEY,
+                member_id INTEGER REFERENCES members(id) ON DELETE CASCADE UNIQUE,
+                member_name VARCHAR(50),
+                balance FLOAT DEFAULT 0.0,
+                last_updated TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Initialize with 0 balance for all existing members
+        cur.execute("""
+            INSERT INTO fairness_balance (member_id, member_name, balance)
+            SELECT id, name, 0.0 FROM members
+            ON CONFLICT (member_id) DO NOTHING
+        """)
+
+        conn.commit()
+        print("fairness_balance table created and initialized!")
+
+    except Exception as e:
+        conn.rollback()
+        print(f"Migratie fout: {e}")
+        raise e
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def ensure_fairness_balance_exists():
+    """Zorg dat alle members een fairness_balance record hebben.
+
+    Wordt automatisch aangeroepen bij ophalen van balances.
+    """
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        # Insert missing members with 0 balance
+        cur.execute("""
+            INSERT INTO fairness_balance (member_id, member_name, balance)
+            SELECT id, name, 0.0 FROM members
+            WHERE id NOT IN (SELECT member_id FROM fairness_balance WHERE member_id IS NOT NULL)
+            ON CONFLICT (member_id) DO NOTHING
+        """)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_fairness_balance(member_id: str) -> float:
+    """Haal de fairness balance op voor een lid.
+
+    Returns:
+        Float waarde van de balance.
+        Positief = lid heeft schuld (moet meer doen)
+        Negatief = lid heeft tegoed (heeft extra gedaan)
+    """
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT balance FROM fairness_balance WHERE member_id = %s
+    """, (int(member_id),))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row["balance"] if row else 0.0
+
+
+def get_all_fairness_balances() -> dict:
+    """Haal alle fairness balances op als {member_name: balance}.
+
+    Initialiseert ontbrekende records automatisch.
+    """
+    # Zorg dat alle members een record hebben
+    ensure_fairness_balance_exists()
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT member_name, balance FROM fairness_balance")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return {r["member_name"]: r["balance"] for r in rows}
+
+
+def update_fairness_balance(member_id: str, delta: float):
+    """Update de fairness balance voor een lid.
+
+    Args:
+        member_id: ID van het gezinslid
+        delta: Aanpassing aan de balance
+               Positief = lid krijgt meer schuld (bijv. was afwezig)
+               Negatief = lid heeft extra gedaan (bijv. vervangen)
+    """
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        # Eerst proberen te updaten
+        cur.execute("""
+            UPDATE fairness_balance
+            SET balance = balance + %s, last_updated = CURRENT_TIMESTAMP
+            WHERE member_id = %s
+        """, (delta, int(member_id)))
+
+        # Als er geen rij was om te updaten, insert een nieuwe
+        if cur.rowcount == 0:
+            # Haal member naam op
+            cur.execute("SELECT name FROM members WHERE id = %s", (int(member_id),))
+            row = cur.fetchone()
+            if row:
+                cur.execute("""
+                    INSERT INTO fairness_balance (member_id, member_name, balance)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (member_id) DO UPDATE SET
+                        balance = fairness_balance.balance + EXCLUDED.balance,
+                        last_updated = CURRENT_TIMESTAMP
+                """, (int(member_id), row["name"], delta))
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cur.close()
+        conn.close()
+
+
+def set_fairness_balance(member_id: str, balance: float):
+    """Zet de fairness balance naar een specifieke waarde.
+
+    Gebruikt voor normalisatie (reset naar 0 of correctie).
+    """
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            UPDATE fairness_balance
+            SET balance = %s, last_updated = CURRENT_TIMESTAMP
+            WHERE member_id = %s
+        """, (balance, int(member_id)))
+
+        if cur.rowcount == 0:
+            cur.execute("SELECT name FROM members WHERE id = %s", (int(member_id),))
+            row = cur.fetchone()
+            if row:
+                cur.execute("""
+                    INSERT INTO fairness_balance (member_id, member_name, balance)
+                    VALUES (%s, %s, %s)
+                """, (int(member_id), row["name"], balance))
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cur.close()
+        conn.close()
+
+
+def normalize_fairness_balances():
+    """Normaliseer alle fairness balances zodat het gemiddelde 0 is.
+
+    Dit voorkomt drift over lange tijd en zorgt dat de balances
+    relatief blijven aan elkaar.
+    """
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        # Bereken het gemiddelde
+        cur.execute("SELECT AVG(balance) as avg_balance FROM fairness_balance")
+        row = cur.fetchone()
+        avg_balance = row["avg_balance"] if row and row["avg_balance"] else 0.0
+
+        # Trek het gemiddelde van iedereen af
+        cur.execute("""
+            UPDATE fairness_balance
+            SET balance = balance - %s, last_updated = CURRENT_TIMESTAMP
+        """, (avg_balance,))
+
+        conn.commit()
+        return avg_balance  # Return hoeveel er is aangepast
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cur.close()
+        conn.close()

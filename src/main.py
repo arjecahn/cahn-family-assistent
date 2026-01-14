@@ -11,9 +11,10 @@ from .database import (
     seed_initial_data, reset_tasks_2026, update_task_targets, get_all_tasks,
     get_member_by_name, get_last_completion_for_member, delete_completion,
     migrate_add_cascade_delete, migrate_add_schedule_table, migrate_add_missed_tasks_table,
-    get_missed_tasks_for_week, get_missed_tasks_for_member
+    get_missed_tasks_for_week, get_missed_tasks_for_member,
+    migrate_add_fairness_balance_table, get_all_fairness_balances, normalize_fairness_balances,
+    get_all_members
 )
-from .voice_handlers import handle_google_action
 
 app = FastAPI(
     title="Cahn Family Task Assistant",
@@ -109,6 +110,20 @@ async def run_missed_tasks_table_migration():
     try:
         migrate_add_missed_tasks_table()
         return {"status": "ok", "message": "missed_tasks tabel aangemaakt"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/migrate/fairness-balance-table")
+async def run_fairness_balance_table_migration():
+    """Voer migratie uit om fairness_balance tabel toe te voegen.
+
+    Dit is nodig voor het bijhouden van langetermijn eerlijkheid.
+    Veilig om meerdere keren uit te voeren.
+    """
+    try:
+        migrate_add_fairness_balance_table()
+        return {"status": "ok", "message": "fairness_balance tabel aangemaakt en geinitialiseerd"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -489,15 +504,82 @@ async def get_missed_tasks_for_person(member_name: str, limit: int = 20):
     ]
 
 
-# === Google Actions Webhook ===
+# === Fairness Balance ===
 
-@app.post("/webhook/google")
-async def google_actions_webhook(request: dict):
+@app.get("/api/fairness")
+async def get_fairness_balances():
+    """Haal de fairness balances op voor alle gezinsleden.
+
+    Returns:
+        Dict met per persoon hun balance en uitleg.
+        Positief = schuld (moet meer doen, bijv. na vakantie)
+        Negatief = tegoed (heeft extra gedaan, bijv. siblings vervangen)
     """
-    Webhook endpoint voor Google Actions.
-    Ontvangt requests van Google Assistant en stuurt responses terug.
+    balances = get_all_fairness_balances()
+    members = get_all_members()
+
+    result = []
+    for member in members:
+        balance = balances.get(member.name, 0.0)
+        if balance > 0.5:
+            status = "schuld"
+            explanation = f"Heeft {balance:.1f} taken 'schuld' (bijv. door afwezigheid)"
+        elif balance < -0.5:
+            status = "tegoed"
+            explanation = f"Heeft {abs(balance):.1f} taken 'tegoed' (extra werk gedaan)"
+        else:
+            status = "in balans"
+            explanation = "Eerlijke verdeling"
+
+        result.append({
+            "name": member.name,
+            "balance": round(balance, 2),
+            "status": status,
+            "explanation": explanation
+        })
+
+    return {
+        "fairness_balances": result,
+        "info": "Positief = moet meer doen, Negatief = heeft extra gedaan"
+    }
+
+
+@app.post("/api/fairness/normalize")
+async def normalize_fairness():
+    """Normaliseer alle fairness balances zodat het gemiddelde 0 is.
+
+    Dit is nuttig om drift te voorkomen over lange tijd.
+    Wordt automatisch gedaan, maar kan ook handmatig worden uitgevoerd.
     """
-    return handle_google_action(request)
+    try:
+        adjustment = normalize_fairness_balances()
+        return {
+            "status": "ok",
+            "message": "Fairness balances genormaliseerd",
+            "adjustment": round(adjustment, 2)
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/fairness/reset")
+async def reset_fairness():
+    """Reset alle fairness balances naar 0.
+
+    LET OP: Dit verwijdert alle opgebouwde schuld/tegoed!
+    Alleen gebruiken als je helemaal opnieuw wilt beginnen.
+    """
+    try:
+        members = get_all_members()
+        from .database import set_fairness_balance
+        for member in members:
+            set_fairness_balance(member.id, 0.0)
+        return {
+            "status": "ok",
+            "message": "Alle fairness balances gereset naar 0"
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 # === Local development ===
