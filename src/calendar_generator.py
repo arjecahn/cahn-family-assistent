@@ -52,16 +52,14 @@ def generate_ical(schedule: dict, member_emails: dict = None) -> Calendar:
             completed_by = task.get("completed_by")
             is_missed = task.get("missed", False)
 
+            # Korte leesbare titel: "Taak - Naam" met optionele emoji
+            person = completed_by or assignee or "?"
             if completed:
-                # Voltooide taak - toon wie het deed
-                done_by = completed_by or assignee or "?"
-                title = f"[DONE] {task_name} - {done_by}"
+                title = f"✓ {task_name} - {person}"
             elif is_missed:
-                # Gemiste taak (niet meer relevant)
-                title = f"[MISSED] {task_name} - {assignee or '?'}"
+                title = f"✗ {task_name} - {person}"
             else:
-                # Nog te doen
-                title = f"{task_name} - {assignee or '?'}"
+                title = f"{task_name} - {person}"
 
             event.add('summary', title)
 
@@ -101,12 +99,12 @@ def generate_ical(schedule: dict, member_emails: dict = None) -> Calendar:
             event.add('transp', 'TRANSPARENT')
 
             # Voeg attendee toe voor uitnodiging
-            person = assignee if not completed else (completed_by or assignee)
-            if person and person in member_emails and member_emails[person]:
-                event.add('organizer', 'mailto:huishouden@cahn.com')
-                event.add('attendee', f'mailto:{member_emails[person]}',
+            attendee_person = assignee if not completed else (completed_by or assignee)
+            if attendee_person and attendee_person in member_emails and member_emails[attendee_person]:
+                event.add('organizer', 'mailto:arje@cahn.com')
+                event.add('attendee', f'mailto:{member_emails[attendee_person]}',
                          parameters={
-                             'CN': person,
+                             'CN': attendee_person,
                              'PARTSTAT': 'ACCEPTED' if completed else 'NEEDS-ACTION',
                              'ROLE': 'REQ-PARTICIPANT'
                          })
