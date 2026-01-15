@@ -3,6 +3,7 @@ import os
 import secrets
 from datetime import date, timedelta
 from fastapi import FastAPI, HTTPException, Depends, Header, Response
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -428,6 +429,227 @@ async def register_absence(request: AbsenceRequest):
 async def weekly_summary():
     """Geef het weekoverzicht."""
     return engine.get_weekly_summary()
+
+
+@app.get("/taken", response_class=HTMLResponse)
+async def tasks_pwa():
+    """PWA pagina voor het afvinken van taken."""
+    return """<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#4f46e5">
+    <title>Huishoudtaken</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 400px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        }
+        .picker {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        .picker button {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            transition: all 0.2s;
+        }
+        .picker button.active {
+            background: white;
+            color: #4f46e5;
+        }
+        .task {
+            display: flex;
+            align-items: center;
+            padding: 16px;
+            margin: 8px 0;
+            background: #f8fafc;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .task:hover { background: #f1f5f9; }
+        .task.done {
+            background: #dcfce7;
+            text-decoration: line-through;
+            opacity: 0.7;
+        }
+        .task .check {
+            width: 28px;
+            height: 28px;
+            border: 3px solid #cbd5e1;
+            border-radius: 50%;
+            margin-right: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+        .task.done .check {
+            background: #22c55e;
+            border-color: #22c55e;
+            color: white;
+        }
+        .task .info { flex: 1; }
+        .task .name { font-weight: 600; color: #1e293b; }
+        .task .time { font-size: 13px; color: #64748b; }
+        .empty {
+            text-align: center;
+            color: #64748b;
+            padding: 30px;
+        }
+        .loading {
+            text-align: center;
+            color: white;
+            padding: 40px;
+        }
+        .summary {
+            text-align: center;
+            color: #64748b;
+            font-size: 14px;
+            margin-top: 12px;
+        }
+        .refresh {
+            display: block;
+            margin: 20px auto;
+            padding: 12px 30px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: none;
+            border-radius: 25px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Huishoudtaken</h1>
+
+        <div class="picker" id="picker">
+            <button onclick="selectMember('Nora')">Nora</button>
+            <button onclick="selectMember('Linde')">Linde</button>
+            <button onclick="selectMember('Fenna')">Fenna</button>
+        </div>
+
+        <div class="card">
+            <div id="tasks">
+                <div class="loading">Kies je naam...</div>
+            </div>
+            <div class="summary" id="summary"></div>
+        </div>
+
+        <button class="refresh" onclick="loadTasks()">Vernieuwen</button>
+    </div>
+
+    <script>
+        const API = '';
+        let currentMember = localStorage.getItem('member');
+
+        if (currentMember) {
+            selectMember(currentMember);
+        }
+
+        function selectMember(name) {
+            currentMember = name;
+            localStorage.setItem('member', name);
+            document.querySelectorAll('.picker button').forEach(b => {
+                b.classList.toggle('active', b.textContent === name);
+            });
+            loadTasks();
+        }
+
+        async function loadTasks() {
+            if (!currentMember) return;
+
+            document.getElementById('tasks').innerHTML = '<div class="loading">Laden...</div>';
+
+            try {
+                const res = await fetch(API + '/api/my-tasks/' + currentMember);
+                const data = await res.json();
+                renderTasks(data);
+            } catch (e) {
+                document.getElementById('tasks').innerHTML = '<div class="empty">Fout bij laden</div>';
+            }
+        }
+
+        function renderTasks(data) {
+            const tasks = [...data.open, ...data.done];
+
+            if (tasks.length === 0) {
+                document.getElementById('tasks').innerHTML = '<div class="empty">Geen taken vandaag!</div>';
+                document.getElementById('summary').textContent = '';
+                return;
+            }
+
+            const html = tasks.map(t => {
+                const timeLabel = {ochtend: 'Ochtend', middag: 'Middag', avond: 'Avond'}[t.time_of_day] || '';
+                return `
+                    <div class="task ${t.completed ? 'done' : ''}" onclick="toggleTask('${t.task_name}', ${t.completed})">
+                        <div class="check">${t.completed ? '✓' : ''}</div>
+                        <div class="info">
+                            <div class="name">${t.task_name}</div>
+                            <div class="time">${timeLabel}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            document.getElementById('tasks').innerHTML = html;
+            document.getElementById('summary').textContent = data.summary;
+        }
+
+        async function toggleTask(taskName, isDone) {
+            if (isDone) return; // Kan niet un-doen via UI
+
+            try {
+                const res = await fetch(API + '/api/complete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({member_name: currentMember, task_name: taskName})
+                });
+                if (res.ok) {
+                    loadTasks();
+                }
+            } catch (e) {
+                alert('Fout bij afvinken');
+            }
+        }
+    </script>
+</body>
+</html>"""
 
 
 @app.get("/api/my-tasks/{member_name}")
