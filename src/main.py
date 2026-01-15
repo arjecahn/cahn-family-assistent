@@ -11,6 +11,7 @@ from .database import (
     seed_initial_data, reset_tasks_2026, update_task_targets, get_all_tasks,
     get_member_by_name, get_last_completion_for_member, delete_completion,
     migrate_add_cascade_delete, migrate_add_schedule_table, migrate_add_missed_tasks_table,
+    migrate_add_member_email, update_member_email, get_all_members,
     get_missed_tasks_for_week, get_missed_tasks_for_member
 )
 from .voice_handlers import handle_google_action
@@ -112,6 +113,50 @@ async def run_missed_tasks_table_migration():
         return {"status": "ok", "message": "missed_tasks tabel aangemaakt"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/migrate/member-email")
+async def run_member_email_migration():
+    """Voer migratie uit om email kolom toe te voegen aan members tabel.
+
+    Veilig om meerdere keren uit te voeren.
+    """
+    try:
+        migrate_add_member_email()
+        return {"status": "ok", "message": "email kolom toegevoegd aan members tabel"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/members")
+async def list_members():
+    """Haal alle gezinsleden op met hun email adressen."""
+    members = get_all_members()
+    return [
+        {
+            "name": m.name,
+            "email": m.email
+        }
+        for m in members
+    ]
+
+
+class UpdateMemberEmailRequest(BaseModel):
+    email: str
+
+
+@app.put("/api/members/{member_name}/email")
+async def set_member_email(member_name: str, request: UpdateMemberEmailRequest):
+    """Update de email van een gezinslid."""
+    try:
+        member = update_member_email(member_name, request.email)
+        return {
+            "success": True,
+            "message": f"Email voor {member_name} ingesteld op {request.email}",
+            "member": {"name": member.name, "email": member.email}
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @app.get("/api/tasks")

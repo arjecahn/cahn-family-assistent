@@ -450,11 +450,11 @@ def get_all_members() -> list[Member]:
     """Haal alle gezinsleden op."""
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT id, name FROM members")
+    cur.execute("SELECT id, name, email FROM members")
     rows = cur.fetchall()
     cur.close()
     conn.close()
-    return [Member(id=str(r["id"]), name=r["name"]) for r in rows]
+    return [Member(id=str(r["id"]), name=r["name"], email=r.get("email")) for r in rows]
 
 
 def get_member_by_name(name: str) -> Optional[Member]:
@@ -1231,6 +1231,60 @@ def migrate_add_missed_tasks_table():
         conn.rollback()
         print(f"Migratie fout: {e}")
         raise e
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def migrate_add_member_email():
+    """Migratie: voeg email kolom toe aan members tabel."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        # Check of kolom al bestaat
+        cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'members' AND column_name = 'email'
+        """)
+        if cur.fetchone():
+            print("email kolom bestaat al")
+            return
+
+        cur.execute("""
+            ALTER TABLE members ADD COLUMN email VARCHAR(100)
+        """)
+        conn.commit()
+        print("email kolom toegevoegd aan members tabel!")
+
+    except Exception as e:
+        conn.rollback()
+        print(f"Migratie fout: {e}")
+        raise e
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def update_member_email(member_name: str, email: str) -> Member:
+    """Update de email van een gezinslid."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            UPDATE members SET email = %s WHERE name = %s
+            RETURNING id, name, email
+        """, (email, member_name))
+        row = cur.fetchone()
+        conn.commit()
+
+        if not row:
+            raise ValueError(f"Gezinslid '{member_name}' niet gevonden")
+
+        return Member(id=str(row["id"]), name=row["name"], email=row["email"])
 
     finally:
         cur.close()

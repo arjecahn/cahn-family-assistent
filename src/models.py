@@ -8,6 +8,7 @@ class Member(BaseModel):
     """Gezinslid (Nora, Linde, Fenna)."""
     id: str
     name: str
+    email: Optional[str] = None
 
 
 class Task(BaseModel):
