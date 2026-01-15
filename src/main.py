@@ -2,7 +2,7 @@
 import os
 import secrets
 from datetime import date, timedelta
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, Response
 from pydantic import BaseModel
 from typing import Optional
 
@@ -14,6 +14,7 @@ from .database import (
     get_missed_tasks_for_week, get_missed_tasks_for_member
 )
 from .voice_handlers import handle_google_action
+from .calendar_generator import generate_ical
 
 app = FastAPI(
     title="Cahn Family Task Assistant",
@@ -395,6 +396,36 @@ async def week_schedule():
     Dit toont per dag wie welke taken moet doen, met afvinkbare checkboxes.
     """
     return engine.get_week_schedule()
+
+
+@app.get("/api/calendar.ics")
+async def get_calendar_feed():
+    """
+    iCal feed van het weekrooster.
+
+    Subscribe URL: https://cahn-family-assistent.vercel.app/api/calendar.ics
+
+    Familieleden kunnen deze URL toevoegen aan hun kalender app:
+    - Google Calendar: Instellingen > Agenda toevoegen > Van URL
+    - Apple Calendar: Archief > Nieuw agenda-abonnement
+    - Outlook: Agenda toevoegen > Van internet
+
+    De kalender toont:
+    - Alle huishoudtaken voor de week
+    - Wie aan de beurt is
+    - Status (gedaan/nog te doen/gemist)
+    """
+    schedule_data = engine.get_week_schedule()
+    cal = generate_ical(schedule_data["schedule"])
+
+    return Response(
+        content=cal.to_ical(),
+        media_type="text/calendar",
+        headers={
+            "Content-Disposition": "attachment; filename=cahn-taken.ics",
+            "Cache-Control": "no-cache, max-age=300"  # 5 min cache
+        }
+    )
 
 
 @app.post("/api/schedule/regenerate")
