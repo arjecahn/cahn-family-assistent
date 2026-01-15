@@ -93,6 +93,9 @@ def generate_ical(schedule: dict) -> Calendar:
             # Timestamp voor wanneer dit event is aangemaakt/gewijzigd
             event.add('dtstamp', datetime.now())
 
+            # Niet als "busy" tonen in kalender
+            event.add('transp', 'TRANSPARENT')
+
             cal.add_component(event)
 
     return cal
