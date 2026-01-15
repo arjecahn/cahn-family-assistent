@@ -461,7 +461,12 @@ async def get_calendar_feed():
     - Status (gedaan/nog te doen/gemist)
     """
     schedule_data = engine.get_week_schedule()
-    cal = generate_ical(schedule_data["schedule"])
+
+    # Haal emails op voor uitnodigingen
+    members = get_all_members()
+    member_emails = {m.name: m.email for m in members if m.email}
+
+    cal = generate_ical(schedule_data["schedule"], member_emails)
 
     return Response(
         content=cal.to_ical(),

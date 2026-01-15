@@ -10,16 +10,20 @@ TIME_SLOTS = {
 }
 
 
-def generate_ical(schedule: dict) -> Calendar:
+def generate_ical(schedule: dict, member_emails: dict = None) -> Calendar:
     """
     Genereer een iCal calendar van het weekrooster.
 
     Args:
         schedule: Dict met 'schedule' key containing days with tasks
+        member_emails: Dict van naam -> email voor uitnodigingen
 
     Returns:
         icalendar.Calendar object
     """
+    if member_emails is None:
+        member_emails = {}
+
     cal = Calendar()
     cal.add('prodid', '-//Cahn Family Tasks//NL')
     cal.add('version', '2.0')
@@ -95,6 +99,17 @@ def generate_ical(schedule: dict) -> Calendar:
 
             # Niet als "busy" tonen in kalender
             event.add('transp', 'TRANSPARENT')
+
+            # Voeg attendee toe voor uitnodiging
+            person = assignee if not completed else (completed_by or assignee)
+            if person and person in member_emails and member_emails[person]:
+                event.add('organizer', 'mailto:huishouden@cahn.com')
+                event.add('attendee', f'mailto:{member_emails[person]}',
+                         parameters={
+                             'CN': person,
+                             'PARTSTAT': 'ACCEPTED' if completed else 'NEEDS-ACTION',
+                             'ROLE': 'REQ-PARTICIPANT'
+                         })
 
             cal.add_component(event)
 
