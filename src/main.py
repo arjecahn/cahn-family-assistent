@@ -430,6 +430,46 @@ async def weekly_summary():
     return engine.get_weekly_summary()
 
 
+@app.get("/api/my-tasks/{member_name}")
+async def get_my_tasks_today(member_name: str):
+    """Haal taken van vandaag op voor een specifiek gezinslid.
+
+    Perfect voor iOS Shortcuts - toont alleen openstaande taken.
+    """
+    from datetime import date as date_type
+
+    schedule_data = engine.get_week_schedule()
+    today = date_type.today()
+    day_names = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"]
+    today_name = day_names[today.weekday()]
+
+    day_data = schedule_data["schedule"].get(today_name, {})
+    tasks = day_data.get("tasks", [])
+
+    # Filter op persoon en nog niet gedaan
+    my_tasks = [
+        {
+            "task_name": t["task_name"],
+            "time_of_day": t.get("time_of_day", "avond"),
+            "completed": t.get("completed", False)
+        }
+        for t in tasks
+        if t.get("assigned_to") == member_name or t.get("completed_by") == member_name
+    ]
+
+    open_tasks = [t for t in my_tasks if not t["completed"]]
+    done_tasks = [t for t in my_tasks if t["completed"]]
+
+    return {
+        "member": member_name,
+        "date": today.isoformat(),
+        "day": today_name,
+        "open": open_tasks,
+        "done": done_tasks,
+        "summary": f"{len(open_tasks)} nog te doen, {len(done_tasks)} gedaan"
+    }
+
+
 @app.get("/api/schedule")
 async def week_schedule():
     """Haal het weekrooster op met ASCII/emoji overzicht.
