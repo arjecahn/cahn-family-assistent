@@ -2126,7 +2126,7 @@ async def tasks_pwa():
         <!-- VIEW: Stand -->
         <div class="view" id="viewStand">
             <div id="standContent">
-                <div class="loading">Laden...</div>
+                <div class="loading"><div class="spinner"></div>Laden...</div>
             </div>
         </div>
 
@@ -3621,7 +3621,7 @@ async def tasks_pwa():
 
         async function loadStand() {
             const container = document.getElementById('standContent');
-            container.innerHTML = '<div class="loading">Laden...</div>';
+            container.innerHTML = '<div class="loading"><div class="spinner"></div>Laden...</div>';
 
             try {
                 const res = await fetch(API + '/api/stats');
