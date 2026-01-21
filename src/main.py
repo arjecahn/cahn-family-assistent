@@ -1518,8 +1518,9 @@ async def tasks_pwa():
             text-align: center;
             color: #ffd700;
             font-family: Georgia, serif;
-            animation: creditsRoll 15s linear forwards;
+            animation: creditsRoll 45s linear forwards;
             padding-bottom: 100vh;
+            padding-top: 100vh;
         }
         .credits-content h2 {
             font-size: 28px;
