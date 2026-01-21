@@ -2601,7 +2601,7 @@ async def tasks_pwa():
 
         // Easter Egg 4: Animal Fusion Ritual
         const fusionSequence = [];
-        const fusionRequired = ['cat', 'otter', 'bear', 'cat', 'otter', 'bear', 'cat', 'otter', 'bear', 'cat', 'otter', 'bear', 'cat', 'otter', 'bear'];
+        const fusionRequired = ['cat', 'otter', 'bear'];
         let fusionTimeout = null;
 
         function trackFusionClick(type) {
