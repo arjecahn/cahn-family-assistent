@@ -1833,14 +1833,6 @@ async def tasks_pwa():
         .loading {
             color: #667eea;
         }
-        /* Override for dark backgrounds */
-        #viewToday .loading {
-            color: white;
-        }
-        #viewToday .spinner {
-            border-color: rgba(255,255,255,0.3);
-            border-top-color: white;
-        }
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
