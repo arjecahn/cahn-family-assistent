@@ -1817,6 +1817,21 @@ async def tasks_pwa():
             text-align: center;
             color: white;
             padding: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+        }
+        .spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
         .summary {
             text-align: center;
@@ -2796,7 +2811,7 @@ async def tasks_pwa():
         async function loadTasks() {
             if (!currentMember) return;
 
-            document.getElementById('tasks').innerHTML = '<div class="loading">Laden...</div>';
+            document.getElementById('tasks').innerHTML = '<div class="loading"><div class="spinner"></div>Laden...</div>';
 
             try {
                 const dateStr = formatDateISO(currentDate);
@@ -3439,7 +3454,7 @@ async def tasks_pwa():
         // === WEEKROOSTER ===
         async function loadWeekSchedule() {
             const container = document.getElementById('weekSchedule');
-            container.innerHTML = '<div class="loading">Laden...</div>';
+            container.innerHTML = '<div class="loading"><div class="spinner"></div>Laden...</div>';
 
             try {
                 const res = await fetch(API + '/api/schedule');
