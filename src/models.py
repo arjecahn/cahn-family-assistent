@@ -88,3 +88,25 @@ class MissedTask(BaseModel):
     rescheduled_to_day: Optional[int] = None  # Naar welke dag herplant (None = vervallen)
     expired: bool = False  # True als taak niet herplant kon worden
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class CustomRule(BaseModel):
+    """Configureerbare regel voor taakplanning.
+
+    Voorbeelden:
+    - "Nora kan op donderdag nooit het glas wegbrengen"
+    - "Linde mag nooit uitruimen ochtend"
+
+    rule_type:
+    - "unavailable": lid kan deze taak niet op deze dag
+    - "never": lid kan deze taak nooit (ongeacht dag)
+    - "prefer": lid heeft voorkeur voor deze taak (nog niet geïmplementeerd)
+    """
+    id: str
+    member_name: str
+    task_name: Optional[str] = None  # None = alle taken
+    day_of_week: Optional[int] = None  # None = alle dagen, 0=maandag, 6=zondag
+    rule_type: str = "unavailable"
+    description: Optional[str] = None
+    active: bool = True
+    created_at: datetime = Field(default_factory=datetime.utcnow)

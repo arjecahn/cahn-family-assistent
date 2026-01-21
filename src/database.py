@@ -158,6 +158,36 @@ def init_db():
         )
     """)
 
+    # Custom rules - configureerbare restricties voor planning
+    # Bijv: "Nora kan op donderdag nooit het glas wegbrengen"
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS custom_rules (
+            id SERIAL PRIMARY KEY,
+            member_name VARCHAR(50) NOT NULL,
+            task_name VARCHAR(100),
+            day_of_week INTEGER,
+            rule_type VARCHAR(50) NOT NULL DEFAULT 'unavailable',
+            description TEXT,
+            active BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Extra task assignments - handmatig toegevoegde taken (bijv. "ik ga vrijdag koken")
+    # Deze zijn NIET automatisch afgevinkt - gebruiker moet ze zelf afvinken
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS extra_task_assignments (
+            id SERIAL PRIMARY KEY,
+            task_date DATE NOT NULL,
+            task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+            task_name VARCHAR(100) NOT NULL,
+            member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+            member_name VARCHAR(50) NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(task_date, task_id, member_id)
+        )
+    """)
+
     conn.commit()
     cur.close()
     conn.close()
@@ -843,6 +873,197 @@ def update_swap_status(swap_id: str, status: str):
     conn.close()
 
 
+# CRUD operaties voor Custom Rules
+from .models import CustomRule
+
+
+def get_all_custom_rules() -> list[CustomRule]:
+    """Haal alle actieve custom rules op."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, member_name, task_name, day_of_week, rule_type, description, active, created_at
+        FROM custom_rules WHERE active = TRUE
+        ORDER BY member_name, task_name
+    """)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [CustomRule(
+        id=str(r["id"]),
+        member_name=r["member_name"],
+        task_name=r["task_name"],
+        day_of_week=r["day_of_week"],
+        rule_type=r["rule_type"],
+        description=r["description"],
+        active=r["active"],
+        created_at=r["created_at"]
+    ) for r in rows]
+
+
+def add_custom_rule(rule_data: dict) -> CustomRule:
+    """Voeg een nieuwe custom rule toe."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO custom_rules (member_name, task_name, day_of_week, rule_type, description, active)
+        VALUES (%s, %s, %s, %s, %s, %s) RETURNING id, created_at
+    """, (
+        rule_data["member_name"],
+        rule_data.get("task_name"),
+        rule_data.get("day_of_week"),
+        rule_data.get("rule_type", "unavailable"),
+        rule_data.get("description"),
+        rule_data.get("active", True)
+    ))
+    result = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+    return CustomRule(
+        id=str(result["id"]),
+        member_name=rule_data["member_name"],
+        task_name=rule_data.get("task_name"),
+        day_of_week=rule_data.get("day_of_week"),
+        rule_type=rule_data.get("rule_type", "unavailable"),
+        description=rule_data.get("description"),
+        active=rule_data.get("active", True),
+        created_at=result["created_at"]
+    )
+
+
+def delete_custom_rule(rule_id: str) -> bool:
+    """Verwijder een custom rule."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM custom_rules WHERE id = %s", (int(rule_id),))
+    deleted = cur.rowcount > 0
+    conn.commit()
+    cur.close()
+    conn.close()
+    return deleted
+
+
+def update_custom_rule(rule_id: str, rule_data: dict) -> CustomRule:
+    """Update een bestaande custom rule."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE custom_rules SET
+            member_name = %s,
+            task_name = %s,
+            day_of_week = %s,
+            rule_type = %s,
+            description = %s,
+            active = %s
+        WHERE id = %s
+        RETURNING id, member_name, task_name, day_of_week, rule_type, description, active, created_at
+    """, (
+        rule_data["member_name"],
+        rule_data.get("task_name"),
+        rule_data.get("day_of_week"),
+        rule_data.get("rule_type", "unavailable"),
+        rule_data.get("description"),
+        rule_data.get("active", True),
+        int(rule_id)
+    ))
+    r = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+    if not r:
+        raise ValueError(f"Rule {rule_id} not found")
+    return CustomRule(
+        id=str(r["id"]),
+        member_name=r["member_name"],
+        task_name=r["task_name"],
+        day_of_week=r["day_of_week"],
+        rule_type=r["rule_type"],
+        description=r["description"],
+        active=r["active"],
+        created_at=r["created_at"]
+    )
+
+
+# CRUD operaties voor Extra Task Assignments (handmatig toegevoegde taken)
+def add_extra_task_assignment(task_date: date, task_id: int, task_name: str,
+                               member_id: int, member_name: str) -> dict:
+    """Voeg een extra taak toe aan een dag (niet automatisch afgevinkt)."""
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            INSERT INTO extra_task_assignments (task_date, task_id, task_name, member_id, member_name)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, created_at
+        """, (task_date, task_id, task_name, member_id, member_name))
+        result = cur.fetchone()
+        conn.commit()
+        return {
+            "id": str(result["id"]),
+            "task_date": task_date.isoformat(),
+            "task_name": task_name,
+            "member_name": member_name,
+            "created_at": result["created_at"]
+        }
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_extra_task_assignments_for_date(task_date: date, member_name: str = None) -> list[dict]:
+    """Haal extra taken op voor een datum (optioneel gefilterd op member)."""
+    conn = get_db()
+    cur = conn.cursor()
+    if member_name:
+        cur.execute("""
+            SELECT id, task_date, task_id, task_name, member_id, member_name, created_at
+            FROM extra_task_assignments
+            WHERE task_date = %s AND member_name = %s
+        """, (task_date, member_name))
+    else:
+        cur.execute("""
+            SELECT id, task_date, task_id, task_name, member_id, member_name, created_at
+            FROM extra_task_assignments
+            WHERE task_date = %s
+        """, (task_date,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def delete_extra_task_assignment(assignment_id: str) -> bool:
+    """Verwijder een extra taak assignment."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM extra_task_assignments WHERE id = %s RETURNING task_name, member_name",
+                (int(assignment_id),))
+    result = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+    return result is not None
+
+
+def delete_extra_task_by_details(task_date: date, task_name: str, member_name: str) -> bool:
+    """Verwijder een extra taak op basis van datum, taak en persoon."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        DELETE FROM extra_task_assignments
+        WHERE task_date = %s AND task_name = %s AND member_name = %s
+    """, (task_date, task_name, member_name))
+    deleted = cur.rowcount > 0
+    conn.commit()
+    cur.close()
+    conn.close()
+    return deleted
+
+
 # CRUD operaties voor Schedule Assignments
 def schedule_exists_for_week(week_number: int, year: int) -> bool:
     """Check of er al een rooster bestaat voor deze week."""
@@ -1079,13 +1300,14 @@ def get_today_tasks_for_member(member_name: str, week_number: int, year: int, da
     """Haal taken van vandaag op voor één lid in één database connectie.
 
     Geoptimaliseerd voor PWA - minimale data, maximale snelheid.
+    Bevat nu ook extra_assignments (handmatig toegevoegde taken).
     """
     conn = get_db()
     cur = conn.cursor()
 
-    result = {"assignments": [], "completions": [], "tasks": {}}
+    result = {"assignments": [], "completions": [], "extra_assignments": []}
 
-    # 1. Assignments voor vandaag
+    # 1. Reguliere assignments voor vandaag (uit schedule)
     cur.execute("""
         SELECT sa.task_name, sa.member_name, t.time_of_day
         FROM schedule_assignments sa
@@ -1101,6 +1323,15 @@ def get_today_tasks_for_member(member_name: str, week_number: int, year: int, da
         WHERE week_number = %s AND DATE(completed_at) = %s
     """, (week_number, today))
     result["completions"] = {r["task_name"]: r["member_name"] for r in cur.fetchall()}
+
+    # 3. Extra assignments (handmatig toegevoegde taken)
+    cur.execute("""
+        SELECT eta.id, eta.task_name, eta.member_name, t.time_of_day
+        FROM extra_task_assignments eta
+        JOIN tasks t ON eta.task_id = t.id
+        WHERE eta.task_date = %s
+    """, (today,))
+    result["extra_assignments"] = cur.fetchall()
 
     cur.close()
     conn.close()

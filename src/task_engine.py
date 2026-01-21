@@ -29,9 +29,10 @@ TASK_MIN_SPACING = {
 # Maximum aantal taken per dag (harde limiet)
 MAX_TASKS_PER_DAY = 5
 
-# Taken die meerdere tijdslots blokkeren (bijv. koken blokkeert avond + middag)
+# Taken die meerdere tijdslots blokkeren
+# Wie kookt doet geen dekken, inruimen of uitruimen (allemaal avond taken)
 TASK_BLOCKS_SLOTS = {
-    "koken": ["avond", "middag"],  # Wie kookt, doet geen karton/glas die dag
+    "koken": ["avond", "middag"],  # Blokkeert: dekken, inruimen, uitruimen_avond, karton, glas
 }
 
 # Dag namen in het Nederlands
@@ -1194,10 +1195,11 @@ class TaskEngine:
             schedule = self._build_schedule_from_stored(
                 stored_assignments, all_completions, week_start, day_availability, tasks_lookup
             )
-            # Check voor gemiste taken en herplan ze naar toekomstige dagen
-            schedule = self._reschedule_missed_tasks(
-                schedule, week_number, year, week_start, members, tasks_lookup, day_availability
-            )
+            # NOTE: Gemiste taken worden NIET meer doorgeschoven naar toekomstige dagen.
+            # Reden: als iemand afwezig is, eet die niet mee, dus is er minder werk.
+            # Het belangrijkste is dat elke dag de rollen gevuld zijn (dekker, inruimer, uitruimer).
+            # De eerlijke verdeling wordt gegarandeerd bij het genereren van een nieuw schema,
+            # op basis van hoeveel taken iemand daadwerkelijk heeft gedaan (completions).
         else:
             # Genereer nieuw rooster en sla op (met maandelijkse balancering)
             schedule, assignments_to_save = self._generate_new_schedule(
@@ -1613,6 +1615,7 @@ class TaskEngine:
         De verdeling houdt rekening met:
         - Hoeveel taken iemand deze WEEK al heeft
         - Hoeveel taken iemand deze MAAND al heeft (voor eerlijkheid over langere termijn)
+        - Custom rules (bijv. "Nora kan op donderdag geen glas wegbrengen")
         """
         schedule = {}
         assignments_to_save = []
@@ -1624,6 +1627,9 @@ class TaskEngine:
                 "emoji": DAY_EMOJIS[day_idx],
                 "tasks": []
             }
+
+        # Laad custom rules voor planning restricties
+        custom_rules = db.get_all_custom_rules()
 
         # Track hoeveel taken per persoon deze week
         member_week_counts = {m.name: 0 for m in members}
@@ -1652,6 +1658,26 @@ class TaskEngine:
                 continue
 
             today_tasks = [t for t in tasks if day_idx in task_days.get(t.name, [])]
+
+            # Sorteer taken: koken EERST zodat wie kookt geen avondtaken krijgt
+            # (koken blokkeert de "avond" slot via TASK_BLOCKS_SLOTS)
+            def task_priority(t):
+                if t.name == "koken":
+                    return 0  # Koken eerst
+                return 1
+            today_tasks = sorted(today_tasks, key=task_priority)
+
+            # PRE-BLOCK: Blokkeer slots voor ALLE completions van vandaag
+            # (inclusief extra taken die niet gepland waren, bijv. koken)
+            tasks_lookup_by_display = {t.display_name: t for t in tasks}
+            for c in completions:
+                if c.completed_at.date() == day_date and c.member_name in member_day_slots[day_idx]:
+                    # Vind de taak om te weten welke slots te blokkeren
+                    task_obj = tasks_lookup_by_display.get(c.task_name)
+                    if task_obj:
+                        blocked_slots = TASK_BLOCKS_SLOTS.get(task_obj.name, [task_obj.time_of_day])
+                        for slot in blocked_slots:
+                            member_day_slots[day_idx][c.member_name].add(slot)
 
             # Track welke taken vandaag al verwerkt zijn (door scheduled tasks)
             matched_task_names = set()
@@ -1685,12 +1711,19 @@ class TaskEngine:
                             "member_id": member.id,
                             "member_name": member.name
                         })
+                        # Blokkeer tijdslot(s) ook voor voltooide taken
+                        # Bijv: wie kookt (gedaan) krijgt geen uitruimen/dekken meer
+                        blocked_slots = TASK_BLOCKS_SLOTS.get(task.name, [task.time_of_day])
+                        for slot in blocked_slots:
+                            member_day_slots[day_idx][done_by].add(slot)
                 else:
                     # Kies beschikbare persoon met minste taken EN beschikbare tijdslot
-                    # Nu ook met maandelijkse balancering per taaktype
+                    # Nu ook met maandelijkse balancering per taaktype en custom rules
                     assigned = self._select_member_for_task(
                         task, available_members, member_week_counts, member_day_slots[day_idx],
-                        member_month_task_counts=member_month_task_counts
+                        member_month_task_counts=member_month_task_counts,
+                        day_of_week=day_idx,
+                        custom_rules=custom_rules
                     )
 
                     if assigned:
@@ -1746,13 +1779,16 @@ class TaskEngine:
 
     def _select_member_for_task(self, task: Task, available_members: list,
                                    member_week_counts: dict, member_day_slots: dict,
-                                   member_month_task_counts: dict = None) -> Optional[Member]:
+                                   member_month_task_counts: dict = None,
+                                   day_of_week: int = None,
+                                   custom_rules: list = None) -> Optional[Member]:
         """Selecteer het beste lid voor een taak.
 
         Selectiecriteria (in volgorde van prioriteit):
-        1. Tijdslot moet vrij zijn (STRIKT - geen fallback!)
-        2. Minste keer deze specifieke taak gedaan deze MAAND (eerlijke verdeling)
-        3. Minste taken deze WEEK (als maand gelijk is)
+        1. Custom rules: lid mag deze taak op deze dag niet doen
+        2. Tijdslot moet vrij zijn (STRIKT - geen fallback!)
+        3. Minste keer deze specifieke taak gedaan deze MAAND (eerlijke verdeling)
+        4. Minste taken deze WEEK (als maand gelijk is)
         """
         time_slot = task.time_of_day
         task_name = task.display_name
@@ -1767,6 +1803,16 @@ class TaskEngine:
         if not eligible:
             return None  # Niemand beschikbaar - taak kan niet op deze dag
 
+        # Filter op custom rules
+        if custom_rules:
+            eligible = [
+                m for m in eligible
+                if not self._is_blocked_by_rule(m.name, task_name, day_of_week, custom_rules)
+            ]
+
+        if not eligible:
+            return None  # Niemand beschikbaar na custom rules filter
+
         # Sorteer op:
         # 1. Maandelijkse count voor DEZE TAAK (primair - voor eerlijke verdeling per taaktype)
         # 2. Wekelijkse totaal (secundair - voor eerlijke verdeling binnen de week)
@@ -1780,13 +1826,43 @@ class TaskEngine:
         sorted_eligible = sorted(eligible, key=sort_key)
         return sorted_eligible[0]
 
+    def _is_blocked_by_rule(self, member_name: str, task_name: str,
+                            day_of_week: int, custom_rules: list) -> bool:
+        """Check of een lid geblokkeerd wordt door een custom rule.
+
+        Rules worden gematcht op:
+        - member_name moet matchen
+        - task_name moet matchen OF rule.task_name is None (geldt voor alle taken)
+        - day_of_week moet matchen OF rule.day_of_week is None (geldt voor alle dagen)
+        - rule_type: "unavailable" (dag-specifiek) of "never" (altijd)
+        """
+        for rule in custom_rules:
+            if rule.member_name != member_name:
+                continue
+
+            # Check of taak matcht (None = alle taken)
+            task_matches = rule.task_name is None or rule.task_name == task_name
+
+            # Check of dag matcht (None = alle dagen, of specifieke dag)
+            if rule.rule_type == "never":
+                # Never rule: geldt voor alle dagen
+                day_matches = True
+            else:
+                # Unavailable rule: geldt alleen voor specifieke dag
+                day_matches = rule.day_of_week is None or rule.day_of_week == day_of_week
+
+            if task_matches and day_matches:
+                return True
+
+        return False
+
     def _count_member_tasks(self, schedule: dict, members: list) -> dict:
         """Tel hoeveel taken per lid deze week.
 
         Telt correct:
         - Voltooide taken: telt voor wie het DEED (completed_by of assigned_to)
         - Nog te doen taken: telt voor wie GEPLAND staat (assigned_to)
-        - Gemiste taken: telt NIET (worden apart herplant)
+        - Gemiste taken: telt NIET (vervallen - papa/mama heeft het gedaan)
         """
         counts = {m.name: 0 for m in members}
         for day_data in schedule.values():
