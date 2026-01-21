@@ -12,3 +12,4 @@ data/
 !vercel.json
 !package.json
 !docs/*.json
+.env

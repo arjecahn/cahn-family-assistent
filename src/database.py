@@ -52,7 +52,11 @@ DATABASE_URL = get_database_url()
 
 def get_db():
     """Maak een database connectie."""
-    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor, sslmode='require')
+    # Use sslmode from URL if present, otherwise default to require
+    if 'sslmode=' in DATABASE_URL:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    else:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor, sslmode='require')
     return conn
 
 
@@ -1069,6 +1073,39 @@ def add_assignment(week_number: int, year: int, day_of_week: int, task_id: str, 
         member_name=member_name,
         created_at=row["created_at"]
     )
+
+
+def get_today_tasks_for_member(member_name: str, week_number: int, year: int, day_of_week: int, today: date) -> dict:
+    """Haal taken van vandaag op voor één lid in één database connectie.
+
+    Geoptimaliseerd voor PWA - minimale data, maximale snelheid.
+    """
+    conn = get_db()
+    cur = conn.cursor()
+
+    result = {"assignments": [], "completions": [], "tasks": {}}
+
+    # 1. Assignments voor vandaag
+    cur.execute("""
+        SELECT sa.task_name, sa.member_name, t.time_of_day
+        FROM schedule_assignments sa
+        JOIN tasks t ON sa.task_id = t.id
+        WHERE sa.week_number = %s AND sa.year = %s AND sa.day_of_week = %s
+    """, (week_number, year, day_of_week))
+    result["assignments"] = cur.fetchall()
+
+    # 2. Completions voor vandaag
+    cur.execute("""
+        SELECT task_name, member_name
+        FROM completions
+        WHERE week_number = %s AND DATE(completed_at) = %s
+    """, (week_number, today))
+    result["completions"] = {r["task_name"]: r["member_name"] for r in cur.fetchall()}
+
+    cur.close()
+    conn.close()
+
+    return result
 
 
 def get_week_schedule_data(week_number: int, year: int, week_start: date, week_end: date, month: int) -> dict:

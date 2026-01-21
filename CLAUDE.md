@@ -89,6 +89,7 @@ PostgreSQL via Supabase met automatische URL parsing voor Vercel compatibility.
 | `/api/tasks` | GET | Alle taken met configuratie |
 | `/api/tasks/reset-2026` | POST | Reset taken naar 2026 afspraken |
 | `/api/suggest/{task}` | GET | Wie moet deze taak doen? |
+| `/api/explain/{task}` | GET | **Waarom?** - Uitgebreide uitleg met vergelijking |
 | `/api/complete` | POST | Registreer voltooide taak |
 | `/api/undo` | POST | Maak laatste taak ongedaan |
 | `/api/summary` | GET | Weekoverzicht per persoon |
@@ -151,6 +152,15 @@ De planning is FLEXIBEL - taken worden verdeeld op basis van wie er is, niet op 
    - Als niet eerlijk: leg uit waarom en stel alternatieven voor
 
 6. **Vragen over verdeling**: Gebruik suggestForTask om te bepalen wie aan de beurt is, met uitleg waarom.
+
+7. **"Waarom moet ik...?" vragen**: Als een kind vraagt waarom zij een taak moeten doen:
+   - Gebruik explainTaskAssignment om uitgebreide uitleg te geven
+   - Dit toont transparant:
+     - Hoeveel taken iedereen deze week heeft (met visuele balken)
+     - Hoe vaak iedereen deze specifieke taak deze maand heeft gedaan
+     - Wanneer iedereen deze taak voor het laatst deed
+   - Toon de ascii_explanation uit de response
+   - Dit helpt acceptatie: kinderen kunnen ZIEN dat het eerlijk is
 
 ## Output Format
 Toon het weekrooster altijd in een code block zodat de ASCII art goed wordt weergegeven:

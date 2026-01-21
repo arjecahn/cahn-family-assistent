@@ -62,6 +62,43 @@ class TaskSuggestion:
     scores: list[MemberScore]
 
 
+@dataclass
+class MemberComparison:
+    """Vergelijkingsdata voor één gezinslid."""
+    name: str
+    tasks_this_week: int
+    tasks_this_week_bar: str  # Visuele balk ██░░░░
+    specific_task_this_month: int
+    specific_task_bar: str
+    days_since_task: Optional[int]  # None = nog nooit gedaan
+    days_since_text: str
+    is_assigned: bool  # Is dit de persoon die de taak krijgt?
+    is_available: bool
+
+
+@dataclass
+class TaskExplanation:
+    """Uitgebreide uitleg waarom iemand een taak krijgt."""
+    task_name: str
+    task_display_name: str
+    assigned_to: str
+    assigned_to_reason: str  # Korte samenvatting
+
+    # Vergelijking met anderen
+    comparisons: list[MemberComparison]
+
+    # Tekst uitleg
+    week_explanation: str  # "Jij hebt de minste taken deze week"
+    month_explanation: str  # "Jij hebt inruimen het minst gedaan deze maand"
+    recency_explanation: str  # "Het is 5 dagen geleden dat jij dit deed"
+
+    # Samenvattende conclusie
+    conclusion: str
+
+    # Ruwe data voor wie het wil zien
+    raw_scores: dict  # {"Nora": 0.42, "Linde": 0.78, ...}
+
+
 class TaskEngine:
     """Engine voor het beheren van huishoudelijke taken."""
 
@@ -199,6 +236,215 @@ class TaskEngine:
             return f"{name} heeft {task.display_name} deze week nog niet gedaan."
         else:
             return f"{name} is het langst geleden dat die {task.display_name} heeft gedaan."
+
+    def explain_task_assignment(self, task_name: str, member_name: Optional[str] = None) -> TaskExplanation:
+        """
+        Genereer uitgebreide uitleg waarom iemand een taak krijgt toegewezen.
+
+        Dit is bedoeld om transparantie te bieden aan de kinderen, zodat ze
+        kunnen zien dat de verdeling eerlijk is.
+
+        Args:
+            task_name: Naam van de taak
+            member_name: Optioneel - specifiek lid om uit te leggen (default: wie aan de beurt is)
+
+        Returns:
+            TaskExplanation met alle vergelijkingsdata en uitleg
+        """
+        task = db.get_task_by_name(task_name)
+        if not task:
+            raise ValueError(f"Taak '{task_name}' niet gevonden")
+
+        all_members = db.get_all_members()
+        available_members = self.get_available_members()
+
+        # Bepaal wie de taak krijgt
+        if member_name:
+            assigned_member = db.get_member_by_name(member_name)
+            if not assigned_member:
+                raise ValueError(f"Gezinslid '{member_name}' niet gevonden")
+        else:
+            suggestion = self.suggest_member_for_task(task_name)
+            assigned_member = suggestion.suggested_member
+
+        # Verzamel data voor alle gezinsleden
+        today = today_local()
+        current_month = today.month
+        current_year = today.year
+        month_completions = db.get_completions_for_month(current_year, current_month)
+
+        comparisons = []
+        raw_scores = {}
+
+        # Bereken max waarden voor de visuele balken
+        week_counts = []
+        month_counts = []
+        for member in all_members:
+            week_count = self.get_task_count_this_week(member)
+            month_count = len([c for c in month_completions
+                              if c.member_id == member.id and c.task_name == task.display_name])
+            week_counts.append(week_count)
+            month_counts.append(month_count)
+
+        max_week = max(week_counts) if week_counts else 1
+        max_month = max(month_counts) if month_counts else 1
+
+        for member in all_members:
+            is_available = member in available_members
+
+            # Taken deze week
+            tasks_week = self.get_task_count_this_week(member)
+            week_bar = self._make_bar(tasks_week, max(max_week, 6))
+
+            # Deze specifieke taak deze maand
+            tasks_month = len([c for c in month_completions
+                              if c.member_id == member.id and c.task_name == task.display_name])
+            month_bar = self._make_bar(tasks_month, max(max_month, 4))
+
+            # Dagen sinds laatste keer
+            last_completion = self.get_last_completion(member, task)
+            if last_completion:
+                days_since = (now_local() - last_completion).days
+                if days_since == 0:
+                    days_text = "vandaag"
+                elif days_since == 1:
+                    days_text = "gisteren"
+                else:
+                    days_text = f"{days_since} dagen geleden"
+            else:
+                days_since = None
+                days_text = "nog nooit"
+
+            # Bereken score (alleen voor beschikbare leden)
+            if is_available:
+                score = self.calculate_weighted_score(member, task, available_members)
+                raw_scores[member.name] = round(score, 3)
+            else:
+                raw_scores[member.name] = None
+
+            comparisons.append(MemberComparison(
+                name=member.name,
+                tasks_this_week=tasks_week,
+                tasks_this_week_bar=week_bar,
+                specific_task_this_month=tasks_month,
+                specific_task_bar=month_bar,
+                days_since_task=days_since,
+                days_since_text=days_text,
+                is_assigned=(member.id == assigned_member.id),
+                is_available=is_available
+            ))
+
+        # Sorteer: toegewezen persoon eerst, dan op score
+        comparisons.sort(key=lambda c: (not c.is_assigned, raw_scores.get(c.name) or 999))
+
+        # Genereer tekstuele uitleg
+        assigned_comp = next(c for c in comparisons if c.is_assigned)
+        others = [c for c in comparisons if not c.is_assigned and c.is_available]
+
+        # Week uitleg
+        if others:
+            min_week = assigned_comp.tasks_this_week
+            max_other_week = max(c.tasks_this_week for c in others) if others else 0
+            if min_week < max_other_week:
+                week_explanation = (
+                    f"{assigned_comp.name} heeft deze week {min_week} taken gedaan, "
+                    f"terwijl anderen er tot {max_other_week} hebben."
+                )
+            elif min_week == max_other_week:
+                week_explanation = f"Iedereen heeft deze week ongeveer evenveel taken ({min_week})."
+            else:
+                week_explanation = f"{assigned_comp.name} heeft deze week {min_week} taken (niet de minste)."
+        else:
+            week_explanation = f"{assigned_comp.name} is de enige die beschikbaar is."
+
+        # Maand uitleg
+        if others:
+            min_month = assigned_comp.specific_task_this_month
+            max_other_month = max(c.specific_task_this_month for c in others) if others else 0
+            if min_month < max_other_month:
+                month_explanation = (
+                    f"{assigned_comp.name} heeft {task.display_name} deze maand {min_month}x gedaan, "
+                    f"anderen tot {max_other_month}x."
+                )
+            elif min_month == 0:
+                month_explanation = f"{assigned_comp.name} heeft {task.display_name} deze maand nog niet gedaan."
+            else:
+                month_explanation = f"Iedereen heeft {task.display_name} deze maand ongeveer even vaak gedaan."
+        else:
+            month_explanation = ""
+
+        # Recency uitleg
+        if assigned_comp.days_since_task is None:
+            recency_explanation = f"{assigned_comp.name} heeft {task.display_name} nog nooit gedaan!"
+        elif assigned_comp.days_since_task == 0:
+            recency_explanation = f"{assigned_comp.name} heeft {task.display_name} vandaag al gedaan."
+        elif assigned_comp.days_since_task >= 3:
+            recency_explanation = (
+                f"Het is {assigned_comp.days_since_task} dagen geleden dat "
+                f"{assigned_comp.name} {task.display_name} deed."
+            )
+        else:
+            recency_explanation = ""
+
+        # Conclusie
+        reasons = []
+        if others:
+            if assigned_comp.tasks_this_week <= min(c.tasks_this_week for c in others):
+                reasons.append("de minste taken deze week")
+            if assigned_comp.specific_task_this_month <= min(c.specific_task_this_month for c in others):
+                reasons.append(f"{task.display_name} het minst gedaan deze maand")
+            if assigned_comp.days_since_task is None or (
+                assigned_comp.days_since_task >= max(
+                    (c.days_since_task or 0) for c in others
+                )
+            ):
+                reasons.append("het langst geleden")
+
+        if reasons:
+            conclusion = f"→ {assigned_comp.name} is aan de beurt omdat die {', '.join(reasons)}."
+        else:
+            conclusion = f"→ {assigned_comp.name} heeft de laagste score en is daarom aan de beurt."
+
+        # Korte reden
+        short_reason = self._generate_reason(
+            MemberScore(
+                member=assigned_member,
+                total_tasks_this_week=assigned_comp.tasks_this_week,
+                specific_task_count=assigned_comp.specific_task_this_month,
+                last_did_task=self.get_last_completion(assigned_member, task),
+                is_available=True,
+                weighted_score=raw_scores.get(assigned_comp.name) or 0
+            ),
+            [MemberScore(
+                member=db.get_member_by_name(c.name),
+                total_tasks_this_week=c.tasks_this_week,
+                specific_task_count=c.specific_task_this_month,
+                last_did_task=None,
+                is_available=c.is_available,
+                weighted_score=raw_scores.get(c.name) or 0
+            ) for c in comparisons],
+            task
+        )
+
+        return TaskExplanation(
+            task_name=task.name,
+            task_display_name=task.display_name,
+            assigned_to=assigned_comp.name,
+            assigned_to_reason=short_reason,
+            comparisons=comparisons,
+            week_explanation=week_explanation,
+            month_explanation=month_explanation,
+            recency_explanation=recency_explanation,
+            conclusion=conclusion,
+            raw_scores=raw_scores
+        )
+
+    def _make_bar(self, value: int, max_value: int, width: int = 6) -> str:
+        """Maak een visuele balk voor vergelijking. █░"""
+        if max_value == 0:
+            return "░" * width
+        filled = min(int((value / max_value) * width), width)
+        return "█" * filled + "░" * (width - filled)
 
     def complete_task(self, member_name: str, task_name: str, completed_date: Optional[date] = None) -> Completion:
         """Registreer dat iemand een taak heeft voltooid.

@@ -297,6 +297,99 @@ async def suggest_for_task(task_name: str):
         raise HTTPException(status_code=404, detail=str(e))
 
 
+@app.get("/api/explain/{task_name}")
+async def explain_task_assignment(task_name: str, member: Optional[str] = None):
+    """
+    Uitgebreide uitleg waarom iemand een taak krijgt toegewezen.
+
+    Dit endpoint is bedoeld om transparantie te bieden aan de kinderen,
+    zodat ze kunnen zien dat de verdeling eerlijk is.
+
+    Args:
+        task_name: Naam van de taak (bijv. "inruimen", "dekken")
+        member: Optioneel - specifiek lid om uit te leggen (default: wie aan de beurt is)
+
+    Returns:
+        Gedetailleerde vergelijking met visuele balken en tekstuele uitleg.
+    """
+    try:
+        explanation = engine.explain_task_assignment(task_name, member)
+
+        return {
+            "task": explanation.task_display_name,
+            "assigned_to": explanation.assigned_to,
+            "short_reason": explanation.assigned_to_reason,
+
+            # Vergelijkingstabel
+            "comparison": [
+                {
+                    "name": c.name,
+                    "is_assigned": c.is_assigned,
+                    "is_available": c.is_available,
+                    "tasks_this_week": c.tasks_this_week,
+                    "tasks_this_week_bar": c.tasks_this_week_bar,
+                    "specific_task_this_month": c.specific_task_this_month,
+                    "specific_task_bar": c.specific_task_bar,
+                    "days_since_task": c.days_since_task,
+                    "days_since_text": c.days_since_text,
+                }
+                for c in explanation.comparisons
+            ],
+
+            # Tekstuele uitleg
+            "explanations": {
+                "week": explanation.week_explanation,
+                "month": explanation.month_explanation,
+                "recency": explanation.recency_explanation,
+            },
+
+            "conclusion": explanation.conclusion,
+
+            # Voor wie de berekening wil zien
+            "raw_scores": explanation.raw_scores,
+
+            # ASCII weergave voor ChatGPT
+            "ascii_explanation": _format_ascii_explanation(explanation)
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+def _format_ascii_explanation(explanation) -> str:
+    """Formatteer de uitleg als ASCII art voor ChatGPT."""
+    lines = []
+    lines.append(f"Waarom moet {explanation.assigned_to} {explanation.task_display_name}?")
+    lines.append("")
+
+    # Taken deze week
+    lines.append("📊 Taken deze week:")
+    for c in explanation.comparisons:
+        marker = " 👈" if c.is_assigned else ""
+        available = "" if c.is_available else " (afwezig)"
+        lines.append(f"   {c.name:6} {c.tasks_this_week_bar} {c.tasks_this_week} taken{available}{marker}")
+
+    lines.append("")
+
+    # Deze taak deze maand
+    lines.append(f"🔄 {explanation.task_display_name.capitalize()} deze maand:")
+    for c in explanation.comparisons:
+        marker = " 👈" if c.is_assigned else ""
+        lines.append(f"   {c.name:6} {c.specific_task_bar} {c.specific_task_this_month}x{marker}")
+
+    lines.append("")
+
+    # Recency
+    lines.append(f"⏰ Laatst {explanation.task_display_name}:")
+    for c in explanation.comparisons:
+        marker = " 👈" if c.is_assigned else ""
+        lines.append(f"   {c.name:6} {c.days_since_text}{marker}")
+
+    lines.append("")
+    lines.append(explanation.conclusion)
+
+    return "\n".join(lines)
+
+
 @app.post("/api/complete")
 async def complete_task(request: TaskCompletionRequest):
     """Registreer dat iemand een taak heeft voltooid."""
@@ -525,6 +618,109 @@ async def tasks_pwa():
         .task .info { flex: 1; }
         .task .name { font-weight: 600; color: #1e293b; }
         .task .time { font-size: 13px; color: #64748b; }
+        .task .why-btn {
+            width: 32px;
+            height: 32px;
+            border: 2px solid #cbd5e1;
+            border-radius: 50%;
+            background: white;
+            color: #64748b;
+            font-weight: bold;
+            font-size: 14px;
+            cursor: pointer;
+            flex-shrink: 0;
+            margin-left: 8px;
+        }
+        .task .why-btn:hover {
+            border-color: #4f46e5;
+            color: #4f46e5;
+        }
+
+        /* Modal styling */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            max-width: 360px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            position: relative;
+        }
+        .modal h2 {
+            color: #1e293b;
+            font-size: 18px;
+            margin-bottom: 16px;
+        }
+        .modal .close-btn {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            width: 30px;
+            height: 30px;
+            border: none;
+            background: #f1f5f9;
+            border-radius: 50%;
+            font-size: 18px;
+            cursor: pointer;
+            color: #64748b;
+        }
+        .modal section {
+            margin-bottom: 16px;
+        }
+        .modal section h3 {
+            font-size: 14px;
+            color: #4f46e5;
+            margin-bottom: 8px;
+        }
+        .comparison-row {
+            display: flex;
+            align-items: center;
+            padding: 6px 0;
+            font-size: 14px;
+        }
+        .comparison-row.assigned {
+            background: #f0fdf4;
+            margin: 0 -8px;
+            padding: 6px 8px;
+            border-radius: 8px;
+        }
+        .comparison-row .name {
+            width: 60px;
+            font-weight: 500;
+        }
+        .comparison-row .bar {
+            font-family: monospace;
+            margin: 0 8px;
+            color: #4f46e5;
+        }
+        .comparison-row .value {
+            color: #64748b;
+        }
+        .comparison-row .marker {
+            margin-left: auto;
+            color: #22c55e;
+        }
+        .modal .conclusion {
+            background: #f8fafc;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            color: #1e293b;
+        }
         .empty {
             text-align: center;
             color: #64748b;
@@ -574,6 +770,15 @@ async def tasks_pwa():
         <button class="refresh" onclick="loadTasks()">Vernieuwen</button>
     </div>
 
+    <!-- Waarom Modal -->
+    <div class="modal-overlay" id="whyModal" onclick="closeModal(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <button class="close-btn" onclick="closeModal()">&times;</button>
+            <h2 id="modalTitle">Waarom ik?</h2>
+            <div id="modalContent">Laden...</div>
+        </div>
+    </div>
+
     <script>
         const API = '';
         let currentMember = localStorage.getItem('member');
@@ -617,12 +822,13 @@ async def tasks_pwa():
             const html = tasks.map(t => {
                 const timeLabel = {ochtend: 'Ochtend', middag: 'Middag', avond: 'Avond'}[t.time_of_day] || '';
                 return `
-                    <div class="task ${t.completed ? 'done' : ''}" onclick="toggleTask('${t.task_name}', ${t.completed})">
-                        <div class="check">${t.completed ? '✓' : ''}</div>
-                        <div class="info">
+                    <div class="task ${t.completed ? 'done' : ''}">
+                        <div class="check" onclick="toggleTask('${t.task_name}', ${t.completed})">${t.completed ? '✓' : ''}</div>
+                        <div class="info" onclick="toggleTask('${t.task_name}', ${t.completed})">
                             <div class="name">${t.task_name}</div>
                             <div class="time">${timeLabel}</div>
                         </div>
+                        <button class="why-btn" onclick="showWhy('${t.task_name}')" title="Waarom ik?">?</button>
                     </div>
                 `;
             }).join('');
@@ -647,6 +853,80 @@ async def tasks_pwa():
                 alert('Fout bij afvinken');
             }
         }
+
+        async function showWhy(taskName) {
+            const modal = document.getElementById('whyModal');
+            const content = document.getElementById('modalContent');
+            const title = document.getElementById('modalTitle');
+
+            title.textContent = 'Waarom moet ik ' + taskName + '?';
+            content.innerHTML = '<div style="text-align:center;color:#64748b;">Laden...</div>';
+            modal.classList.add('show');
+
+            try {
+                const res = await fetch(API + '/api/explain/' + encodeURIComponent(taskName) + '?member=' + currentMember);
+                const data = await res.json();
+                content.innerHTML = renderExplanation(data);
+            } catch (e) {
+                content.innerHTML = '<div style="color:#ef4444;">Kon uitleg niet laden</div>';
+            }
+        }
+
+        function renderExplanation(data) {
+            let html = '';
+
+            // Taken deze week
+            html += '<section><h3>📊 Taken deze week</h3>';
+            data.comparison.forEach(c => {
+                const marker = c.is_assigned ? '👈' : '';
+                const cls = c.is_assigned ? 'comparison-row assigned' : 'comparison-row';
+                const avail = c.is_available ? '' : ' (afwezig)';
+                html += `<div class="${cls}">
+                    <span class="name">${c.name}</span>
+                    <span class="bar">${c.tasks_this_week_bar}</span>
+                    <span class="value">${c.tasks_this_week} taken${avail}</span>
+                    <span class="marker">${marker}</span>
+                </div>`;
+            });
+            html += '</section>';
+
+            // Deze taak deze maand
+            html += '<section><h3>🔄 ' + data.task + ' deze maand</h3>';
+            data.comparison.forEach(c => {
+                const marker = c.is_assigned ? '👈' : '';
+                const cls = c.is_assigned ? 'comparison-row assigned' : 'comparison-row';
+                html += `<div class="${cls}">
+                    <span class="name">${c.name}</span>
+                    <span class="bar">${c.specific_task_bar}</span>
+                    <span class="value">${c.specific_task_this_month}x</span>
+                    <span class="marker">${marker}</span>
+                </div>`;
+            });
+            html += '</section>';
+
+            // Laatst gedaan
+            html += '<section><h3>⏰ Laatst ' + data.task + '</h3>';
+            data.comparison.forEach(c => {
+                const marker = c.is_assigned ? '👈' : '';
+                const cls = c.is_assigned ? 'comparison-row assigned' : 'comparison-row';
+                html += `<div class="${cls}">
+                    <span class="name">${c.name}</span>
+                    <span class="value">${c.days_since_text}</span>
+                    <span class="marker">${marker}</span>
+                </div>`;
+            });
+            html += '</section>';
+
+            // Conclusie
+            html += '<div class="conclusion">' + data.conclusion + '</div>';
+
+            return html;
+        }
+
+        function closeModal(event) {
+            if (event && event.target !== event.currentTarget) return;
+            document.getElementById('whyModal').classList.remove('show');
+        }
     </script>
 </body>
 </html>"""
@@ -656,28 +936,34 @@ async def tasks_pwa():
 async def get_my_tasks_today(member_name: str):
     """Haal taken van vandaag op voor een specifiek gezinslid.
 
-    Perfect voor iOS Shortcuts - toont alleen openstaande taken.
+    GEOPTIMALISEERD: Één database call, minimale data.
+    Perfect voor PWA en iOS Shortcuts.
     """
-    from datetime import date as date_type
+    from .database import get_today_tasks_for_member, today_local
 
-    schedule_data = engine.get_week_schedule()
-    today = date_type.today()
+    today = today_local()
+    week_number = today.isocalendar()[1]
+    year = today.isocalendar()[0]
+    day_of_week = today.weekday()
     day_names = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"]
-    today_name = day_names[today.weekday()]
+    today_name = day_names[day_of_week]
 
-    day_data = schedule_data["schedule"].get(today_name, {})
-    tasks = day_data.get("tasks", [])
+    # Eén database call voor alles
+    data = get_today_tasks_for_member(member_name, week_number, year, day_of_week, today)
 
-    # Filter op persoon en nog niet gedaan
-    my_tasks = [
-        {
-            "task_name": t["task_name"],
-            "time_of_day": t.get("time_of_day", "avond"),
-            "completed": t.get("completed", False)
-        }
-        for t in tasks
-        if t.get("assigned_to") == member_name or t.get("completed_by") == member_name
-    ]
+    my_tasks = []
+    for a in data["assignments"]:
+        # Check of dit voor mij is of ik het heb gedaan
+        completed_by = data["completions"].get(a["task_name"])
+        is_completed = completed_by is not None
+        is_mine = (a["member_name"] == member_name) or (completed_by == member_name)
+
+        if is_mine:
+            my_tasks.append({
+                "task_name": a["task_name"],
+                "time_of_day": a["time_of_day"] or "avond",
+                "completed": is_completed
+            })
 
     open_tasks = [t for t in my_tasks if not t["completed"]]
     done_tasks = [t for t in my_tasks if t["completed"]]

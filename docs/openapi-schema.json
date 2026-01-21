@@ -86,6 +86,74 @@
         }
       }
     },
+    "/api/explain/{task_name}": {
+      "get": {
+        "operationId": "explainTaskAssignment",
+        "summary": "Uitgebreide uitleg waarom iemand een taak krijgt",
+        "description": "Geeft transparante vergelijking met visuele balken: hoeveel taken iedereen heeft, hoe vaak iedereen deze specifieke taak deed, wanneer iedereen dit voor het laatst deed. Perfect om te laten zien dat de verdeling eerlijk is!",
+        "parameters": [
+          {
+            "name": "task_name",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Naam van de taak: inruimen, dekken, uitruimen, etc."
+          },
+          {
+            "name": "member",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "Optioneel: specifiek gezinslid om uit te leggen (default: wie aan de beurt is)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Uitgebreide uitleg met vergelijkingsdata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "task": { "type": "string", "description": "Naam van de taak" },
+                    "assigned_to": { "type": "string", "description": "Wie de taak krijgt" },
+                    "short_reason": { "type": "string", "description": "Korte uitleg" },
+                    "comparison": {
+                      "type": "array",
+                      "description": "Vergelijking per gezinslid",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": { "type": "string" },
+                          "is_assigned": { "type": "boolean" },
+                          "is_available": { "type": "boolean" },
+                          "tasks_this_week": { "type": "integer" },
+                          "tasks_this_week_bar": { "type": "string", "description": "Visuele balk ██░░░░" },
+                          "specific_task_this_month": { "type": "integer" },
+                          "specific_task_bar": { "type": "string" },
+                          "days_since_task": { "type": "integer", "nullable": true },
+                          "days_since_text": { "type": "string" }
+                        }
+                      }
+                    },
+                    "explanations": {
+                      "type": "object",
+                      "properties": {
+                        "week": { "type": "string" },
+                        "month": { "type": "string" },
+                        "recency": { "type": "string" }
+                      }
+                    },
+                    "conclusion": { "type": "string", "description": "Samenvatting waarom deze persoon aan de beurt is" },
+                    "ascii_explanation": { "type": "string", "description": "ASCII-formatted uitleg voor chat" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/complete": {
       "post": {
         "operationId": "completeTask",
