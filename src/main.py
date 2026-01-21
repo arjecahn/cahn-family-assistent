@@ -1825,10 +1825,21 @@ async def tasks_pwa():
         .spinner {
             width: 32px;
             height: 32px;
-            border: 3px solid rgba(255,255,255,0.3);
-            border-top-color: white;
+            border: 3px solid rgba(102,126,234,0.3);
+            border-top-color: #667eea;
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
+        }
+        .loading {
+            color: #667eea;
+        }
+        /* Override for dark backgrounds */
+        #viewToday .loading {
+            color: white;
+        }
+        #viewToday .spinner {
+            border-color: rgba(255,255,255,0.3);
+            border-top-color: white;
         }
         @keyframes spin {
             to { transform: rotate(360deg); }
@@ -2115,7 +2126,7 @@ async def tasks_pwa():
         <div class="view" id="viewWeek">
             <div class="card">
                 <div id="weekSchedule">
-                    <div class="loading">Laden...</div>
+                    <div class="loading"><div class="spinner"></div>Laden...</div>
                 </div>
             </div>
         </div>
