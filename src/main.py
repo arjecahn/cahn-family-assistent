@@ -1485,6 +1485,153 @@ async def tasks_pwa():
         @keyframes rainbowSpin {
             to { transform: rotate(360deg); }
         }
+
+        /* Easter Egg: Upside Down Mode */
+        .upside-down #mainContainer {
+            transform: rotate(180deg);
+            transition: transform 1s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+        }
+        .upside-down .bottom-nav {
+            top: 0;
+            bottom: auto;
+            transform: rotate(180deg);
+        }
+
+        /* Easter Egg: Credits Roll */
+        .credits-overlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: linear-gradient(to bottom, #0f0f23, #1a1a3e);
+            z-index: 99999;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .credits-content {
+            text-align: center;
+            color: #ffd700;
+            font-family: Georgia, serif;
+            animation: creditsRoll 15s linear forwards;
+            padding-bottom: 100vh;
+        }
+        .credits-content h2 {
+            font-size: 28px;
+            margin: 40px 0 20px;
+            color: #fff;
+            text-shadow: 0 0 20px #ffd700;
+        }
+        .credits-content p {
+            font-size: 18px;
+            margin: 10px 0;
+            color: #ccc;
+        }
+        .credits-content .star {
+            font-size: 24px;
+            color: #ffd700;
+        }
+        @keyframes creditsRoll {
+            0% { transform: translateY(100vh); }
+            100% { transform: translateY(-100%); }
+        }
+
+        /* Easter Egg: Animal Fusion */
+        .fusion-overlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: radial-gradient(circle, #1a0a2e 0%, #0d0015 100%);
+            z-index: 99999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+        .magic-circle {
+            width: 250px; height: 250px;
+            border: 3px solid #8b5cf6;
+            border-radius: 50%;
+            position: relative;
+            animation: magicPulse 2s ease-in-out infinite, magicSpin 10s linear infinite;
+            box-shadow: 0 0 50px #8b5cf6, inset 0 0 50px rgba(139, 92, 246, 0.3);
+        }
+        .magic-circle::before {
+            content: '✦';
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 60px;
+            color: #ffd700;
+            animation: starPulse 1s ease-in-out infinite;
+        }
+        @keyframes magicPulse {
+            0%, 100% { box-shadow: 0 0 50px #8b5cf6, inset 0 0 50px rgba(139, 92, 246, 0.3); }
+            50% { box-shadow: 0 0 100px #a78bfa, inset 0 0 80px rgba(167, 139, 250, 0.5); }
+        }
+        @keyframes magicSpin {
+            to { transform: rotate(360deg); }
+        }
+        @keyframes starPulse {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.3); }
+        }
+        .fusion-animals {
+            position: absolute;
+            font-size: 40px;
+            animation: orbitAnimal 3s linear infinite;
+        }
+        @keyframes orbitAnimal {
+            to { transform: rotate(360deg) translateX(120px) rotate(-360deg); }
+        }
+        .mega-creature {
+            font-size: 120px;
+            animation: creatureAppear 1s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            text-shadow: 0 0 50px #ffd700;
+        }
+        @keyframes creatureAppear {
+            0% { transform: scale(0) rotate(-180deg); opacity: 0; }
+            100% { transform: scale(1) rotate(0deg); opacity: 1; }
+        }
+        .fusion-text {
+            color: #ffd700;
+            font-size: 18px;
+            margin-top: 30px;
+            text-align: center;
+            font-style: italic;
+            text-shadow: 0 0 10px #ffd700;
+        }
+        .banish-btn {
+            margin-top: 20px;
+            padding: 15px 30px;
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            border: none;
+            border-radius: 30px;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            animation: banishPulse 1s ease-in-out infinite;
+        }
+        @keyframes banishPulse {
+            0%, 100% { box-shadow: 0 0 20px #ef4444; }
+            50% { box-shadow: 0 0 40px #f87171; }
+        }
+        .task.banished {
+            background: linear-gradient(90deg, #1a1a1a, #2d1f1f) !important;
+            position: relative;
+            overflow: hidden;
+        }
+        .task.banished::after {
+            content: '🔥';
+            position: absolute;
+            right: 10px;
+            animation: flameDance 0.5s ease-in-out infinite;
+        }
+        @keyframes flameDance {
+            0%, 100% { transform: scale(1) rotate(-5deg); }
+            50% { transform: scale(1.2) rotate(5deg); }
+        }
         .task.done:hover {
             opacity: 1;
             background: #fef3c7;
@@ -1911,8 +2058,8 @@ async def tasks_pwa():
     <!-- Linde's beren en honing -->
     <div class="bears-container" id="bearsContainer"></div>
 
-    <div class="container">
-        <h1>Family Chores</h1>
+    <div class="container" id="mainContainer">
+        <h1 id="appTitle" onclick="handleTitleTap()">Family Chores</h1>
 
         <div class="picker" id="picker">
             <button data-member="Nora" onclick="selectMember('Nora')">Nora</button>
@@ -2271,6 +2418,320 @@ async def tasks_pwa():
         initCats();
         initOtters();
         initBears();
+
+        // === EASTER EGGS ===
+
+        // Easter Egg 1: Title taps (10 = credits, 3 rapid = upside down)
+        let titleTaps = 0;
+        let titleTapTimer = null;
+        let lastTapTime = 0;
+        let rapidTaps = 0;
+
+        function handleTitleTap() {
+            const now = Date.now();
+            titleTaps++;
+
+            // Check for rapid taps (within 300ms)
+            if (now - lastTapTime < 300) {
+                rapidTaps++;
+                if (rapidTaps >= 2) {
+                    // Triple rapid tap = upside down mode
+                    toggleUpsideDown();
+                    rapidTaps = 0;
+                    titleTaps = 0;
+                    return;
+                }
+            } else {
+                rapidTaps = 0;
+            }
+            lastTapTime = now;
+
+            // Reset after 2 seconds of no tapping
+            clearTimeout(titleTapTimer);
+            titleTapTimer = setTimeout(() => {
+                titleTaps = 0;
+                rapidTaps = 0;
+            }, 2000);
+
+            // 10 taps = credits
+            if (titleTaps >= 10) {
+                showCredits();
+                titleTaps = 0;
+            }
+        }
+
+        // Easter Egg 2: Upside Down Mode
+        let isUpsideDown = false;
+        function toggleUpsideDown() {
+            isUpsideDown = !isUpsideDown;
+            document.body.classList.toggle('upside-down', isUpsideDown);
+
+            // Play flip sound
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.frequency.setValueAtTime(isUpsideDown ? 200 : 400, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(isUpsideDown ? 400 : 200, audioCtx.currentTime + 0.3);
+            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.3);
+
+            if (navigator.vibrate) navigator.vibrate([50, 50, 50]);
+        }
+
+        // Easter Egg 3: Credits Roll
+        function showCredits() {
+            if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 100]);
+
+            const overlay = document.createElement('div');
+            overlay.className = 'credits-overlay';
+            overlay.innerHTML = `
+                <div class="credits-content">
+                    <p class="star">⭐ ⭐ ⭐</p>
+                    <h2>FAMILY CHORES</h2>
+                    <p>Een productie van</p>
+                    <h2>De Familie Cahn</h2>
+
+                    <p style="margin-top: 60px;">~ De Cast ~</p>
+                    <h2>🐧 Nora 🦦</h2>
+                    <p>Als de Takenverdelingsexpert</p>
+                    <h2>🐻 Linde 🍯</h2>
+                    <p>Als de Kookprinses</p>
+                    <h2>🐱 Fenna 🐈</h2>
+                    <p>Als de Mysterieuze Helper</p>
+
+                    <p style="margin-top: 60px;">~ Crew ~</p>
+                    <p>Regie: Het Algoritme</p>
+                    <p>Productie: Claude AI</p>
+                    <p>Catering: De Koelkast</p>
+                    <p>Stuntwerk: De Afwasmachine</p>
+                    <p>Special Effects: Confetti.js</p>
+
+                    <p style="margin-top: 60px;">~ Speciale Dank ~</p>
+                    <p>De Vaatwasser</p>
+                    <p>Het Aanrecht</p>
+                    <p>De Glasbak</p>
+                    <p>De Papierbak</p>
+
+                    <p style="margin-top: 80px; font-size: 14px; color: #666;">
+                        Geen taken werden beschadigd<br>
+                        tijdens het maken van deze app
+                    </p>
+
+                    <p style="margin-top: 60px;" class="star">🌟 THE END 🌟</p>
+
+                    <p style="margin-top: 40px; font-size: 12px; color: #444;">
+                        Tik om te sluiten
+                    </p>
+                </div>
+            `;
+
+            // Play credits music
+            playCreditsMusic();
+
+            overlay.onclick = () => {
+                overlay.style.opacity = '0';
+                overlay.style.transition = 'opacity 0.5s';
+                setTimeout(() => overlay.remove(), 500);
+            };
+
+            document.body.appendChild(overlay);
+
+            // Auto close after animation
+            setTimeout(() => {
+                if (overlay.parentNode) {
+                    overlay.style.opacity = '0';
+                    overlay.style.transition = 'opacity 0.5s';
+                    setTimeout(() => overlay.remove(), 500);
+                }
+            }, 16000);
+        }
+
+        function playCreditsMusic() {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                // Simple epic melody
+                const notes = [
+                    {f: 261.63, d: 0.5}, {f: 329.63, d: 0.5}, {f: 392.00, d: 0.5}, {f: 523.25, d: 1},
+                    {f: 392.00, d: 0.5}, {f: 440.00, d: 0.5}, {f: 523.25, d: 1.5}
+                ];
+                let time = audioCtx.currentTime;
+                notes.forEach(note => {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.frequency.value = note.f;
+                    osc.type = 'sine';
+                    gain.gain.setValueAtTime(0.15, time);
+                    gain.gain.exponentialRampToValueAtTime(0.01, time + note.d);
+                    osc.start(time);
+                    osc.stop(time + note.d);
+                    time += note.d * 0.9;
+                });
+            } catch(e) {}
+        }
+
+        // Easter Egg 4: Animal Fusion Ritual
+        const fusionSequence = [];
+        const fusionRequired = ['cat', 'otter', 'bear', 'cat', 'otter', 'bear', 'cat', 'otter', 'bear', 'cat', 'otter', 'bear', 'cat', 'otter', 'bear'];
+        let fusionTimeout = null;
+
+        function trackFusionClick(type) {
+            fusionSequence.push(type);
+
+            // Reset after 5 seconds of no clicks
+            clearTimeout(fusionTimeout);
+            fusionTimeout = setTimeout(() => fusionSequence.length = 0, 5000);
+
+            // Check if sequence matches
+            let matches = true;
+            for (let i = 0; i < fusionSequence.length; i++) {
+                if (fusionSequence[i] !== fusionRequired[i]) {
+                    matches = false;
+                    fusionSequence.length = 0;
+                    break;
+                }
+            }
+
+            if (matches && fusionSequence.length >= fusionRequired.length) {
+                fusionSequence.length = 0;
+                triggerAnimalFusion();
+            }
+        }
+
+        function triggerAnimalFusion() {
+            if (navigator.vibrate) navigator.vibrate([100, 100, 100, 100, 300]);
+
+            const overlay = document.createElement('div');
+            overlay.className = 'fusion-overlay';
+
+            // Phase 1: Magic circle with orbiting animals
+            overlay.innerHTML = `
+                <div class="magic-circle">
+                    <div class="fusion-animals" style="animation-delay: 0s;">🐱</div>
+                    <div class="fusion-animals" style="animation-delay: -1s;">🦦</div>
+                    <div class="fusion-animals" style="animation-delay: -2s;">🐻</div>
+                </div>
+                <div class="fusion-text">De dieren fuseren...</div>
+            `;
+
+            document.body.appendChild(overlay);
+            playFusionSound();
+
+            // Phase 2: Creature appears
+            setTimeout(() => {
+                overlay.innerHTML = `
+                    <div class="mega-creature">🦁</div>
+                    <div class="fusion-text">
+                        <strong>DE TAKENVERNIETIGER IS ONTWAAKT!</strong><br><br>
+                        "Sterfelijke ${currentMember}... je hebt me gesommoned.<br>
+                        Kies één taak om voor EEUWIG te BANNEN!"
+                    </div>
+                    <button class="banish-btn" onclick="chooseBanishTask(this.parentNode.parentNode)">
+                        🔥 KIES EEN TAAK OM TE VERNIETIGEN 🔥
+                    </button>
+                `;
+
+                // Epic reveal sound
+                playCreatureRevealSound();
+            }, 3000);
+        }
+
+        function playFusionSound() {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                // Rising mystical sound
+                for (let i = 0; i < 10; i++) {
+                    setTimeout(() => {
+                        const osc = audioCtx.createOscillator();
+                        const gain = audioCtx.createGain();
+                        osc.connect(gain);
+                        gain.connect(audioCtx.destination);
+                        osc.frequency.value = 200 + i * 50;
+                        osc.type = 'sine';
+                        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                        osc.start();
+                        osc.stop(audioCtx.currentTime + 0.3);
+                    }, i * 250);
+                }
+            } catch(e) {}
+        }
+
+        function playCreatureRevealSound() {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                // Dramatic chord
+                [261.63, 329.63, 392.00, 523.25].forEach(freq => {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.frequency.value = freq;
+                    osc.type = 'triangle';
+                    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 2);
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 2);
+                });
+            } catch(e) {}
+        }
+
+        function chooseBanishTask(overlay) {
+            overlay.remove();
+
+            // Let user pick a task
+            const tasks = document.querySelectorAll('.task:not(.done):not(.banished)');
+            if (tasks.length === 0) {
+                alert('Er zijn geen taken om te vernietigen! 😈');
+                return;
+            }
+
+            // Highlight tasks as clickable
+            tasks.forEach(task => {
+                task.style.cursor = 'pointer';
+                task.style.boxShadow = '0 0 20px #ef4444';
+                task.style.animation = 'banishPulse 0.5s ease-in-out infinite';
+
+                const handler = () => {
+                    // Banish this task!
+                    task.classList.add('banished');
+                    task.style.boxShadow = '';
+                    task.style.animation = '';
+                    task.style.cursor = '';
+
+                    // Remove handlers from other tasks
+                    tasks.forEach(t => {
+                        t.style.boxShadow = '';
+                        t.style.animation = '';
+                        t.style.cursor = '';
+                        t.onclick = null;
+                    });
+
+                    // Epic banish effect
+                    createConfetti(window.innerWidth / 2, window.innerHeight / 2);
+                    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+
+                    // Restore original onclick after a moment
+                    setTimeout(() => {
+                        task.onclick = null;
+                    }, 100);
+                };
+
+                task.addEventListener('click', handler, { once: true });
+            });
+        }
+
+        // Track animal clicks for fusion
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('cat')) trackFusionClick('cat');
+            if (e.target.classList.contains('otter')) trackFusionClick('otter');
+            if (e.target.classList.contains('bear')) trackFusionClick('bear');
+        }, true);
 
         if (currentMember) {
             selectMember(currentMember);
