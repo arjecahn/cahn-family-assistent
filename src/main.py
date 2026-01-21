@@ -3,7 +3,7 @@ import os
 import secrets
 from datetime import date, timedelta
 from fastapi import FastAPI, HTTPException, Depends, Header, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -998,7 +998,12 @@ async def tasks_pwa():
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Chores">
     <meta name="theme-color" content="#4f46e5">
+    <meta name="description" content="Huishoudelijke taken voor de familie Cahn">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/svg+xml" href="/icon-192.png">
     <title>Family Chores</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -4009,6 +4014,16 @@ async def tasks_pwa():
             }
         }
     </script>
+    <script>
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(reg => console.log('SW registered:', reg.scope))
+                    .catch(err => console.log('SW registration failed:', err));
+            });
+        }
+    </script>
 </body>
 </html>"""
 
@@ -4266,6 +4281,173 @@ async def google_actions_webhook(request: dict):
     Ontvangt requests van Google Assistant en stuurt responses terug.
     """
     return handle_google_action(request)
+
+
+# === PWA Assets ===
+
+@app.get("/manifest.json")
+async def pwa_manifest():
+    """Web App Manifest voor PWA installatie."""
+    return JSONResponse({
+        "name": "Family Chores",
+        "short_name": "Chores",
+        "description": "Huishoudelijke taken voor de familie Cahn",
+        "start_url": "/taken",
+        "display": "standalone",
+        "background_color": "#667eea",
+        "theme_color": "#4f46e5",
+        "orientation": "portrait-primary",
+        "icons": [
+            {
+                "src": "/icon-192.png",
+                "sizes": "192x192",
+                "type": "image/png",
+                "purpose": "any maskable"
+            },
+            {
+                "src": "/icon-512.png",
+                "sizes": "512x512",
+                "type": "image/png",
+                "purpose": "any maskable"
+            }
+        ],
+        "categories": ["lifestyle", "utilities"],
+        "lang": "nl"
+    })
+
+
+# SVG icon data - house with checkmark
+ICON_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea"/>
+      <stop offset="100%" style="stop-color:#764ba2"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <path d="M256 100 L420 220 L420 400 L92 400 L92 220 Z" fill="white" opacity="0.95"/>
+  <rect x="200" y="300" width="70" height="100" fill="#667eea" rx="4"/>
+  <rect x="290" y="250" width="50" height="50" fill="#87ceeb" rx="4" opacity="0.8"/>
+  <path d="M256 80 L440 235 L420 255 L256 120 L92 255 L72 235 Z" fill="white"/>
+  <circle cx="350" cy="350" r="60" fill="#10b981"/>
+  <path d="M325 350 L345 370 L380 330" stroke="white" stroke-width="12" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>'''
+
+
+def svg_to_png_data_uri(svg: str, size: int) -> bytes:
+    """Convert SVG to a simple PNG representation.
+
+    Note: For proper PNG conversion, we'd need Pillow or cairosvg.
+    For now, we serve the SVG as-is since modern browsers support it.
+    """
+    return svg.encode('utf-8')
+
+
+@app.get("/icon-192.png")
+async def icon_192():
+    """192x192 app icon."""
+    # Serve SVG with PNG content-type (browsers handle this)
+    # For true PNG, you'd need server-side rendering with Pillow/cairo
+    return Response(
+        content=ICON_SVG.replace('viewBox="0 0 512 512"', 'viewBox="0 0 512 512" width="192" height="192"').encode(),
+        media_type="image/svg+xml"
+    )
+
+
+@app.get("/icon-512.png")
+async def icon_512():
+    """512x512 app icon."""
+    return Response(
+        content=ICON_SVG.replace('viewBox="0 0 512 512"', 'viewBox="0 0 512 512" width="512" height="512"').encode(),
+        media_type="image/svg+xml"
+    )
+
+
+@app.get("/apple-touch-icon.png")
+async def apple_touch_icon():
+    """Apple touch icon (180x180)."""
+    return Response(
+        content=ICON_SVG.replace('viewBox="0 0 512 512"', 'viewBox="0 0 512 512" width="180" height="180"').encode(),
+        media_type="image/svg+xml"
+    )
+
+
+@app.get("/sw.js")
+async def service_worker():
+    """Service Worker voor offline caching."""
+    sw_code = '''
+const CACHE_NAME = 'family-chores-v1';
+const STATIC_ASSETS = [
+    '/taken',
+    '/manifest.json',
+    '/icon-192.png',
+    '/icon-512.png'
+];
+
+// Install event - cache static assets
+self.addEventListener('install', (event) => {
+    event.waitUntil(
+        caches.open(CACHE_NAME).then((cache) => {
+            return cache.addAll(STATIC_ASSETS);
+        })
+    );
+    self.skipWaiting();
+});
+
+// Activate event - cleanup old caches
+self.addEventListener('activate', (event) => {
+    event.waitUntil(
+        caches.keys().then((cacheNames) => {
+            return Promise.all(
+                cacheNames
+                    .filter((name) => name !== CACHE_NAME)
+                    .map((name) => caches.delete(name))
+            );
+        })
+    );
+    self.clients.claim();
+});
+
+// Fetch event - network first, fallback to cache
+self.addEventListener('fetch', (event) => {
+    // Skip non-GET requests
+    if (event.request.method !== 'GET') return;
+
+    // Skip API calls - always go to network
+    if (event.request.url.includes('/api/')) {
+        return;
+    }
+
+    event.respondWith(
+        fetch(event.request)
+            .then((response) => {
+                // Clone response for caching
+                const responseClone = response.clone();
+                caches.open(CACHE_NAME).then((cache) => {
+                    cache.put(event.request, responseClone);
+                });
+                return response;
+            })
+            .catch(() => {
+                // Fallback to cache
+                return caches.match(event.request).then((cachedResponse) => {
+                    if (cachedResponse) {
+                        return cachedResponse;
+                    }
+                    // Return offline page for navigation requests
+                    if (event.request.mode === 'navigate') {
+                        return caches.match('/taken');
+                    }
+                    return new Response('Offline', { status: 503 });
+                });
+            })
+    );
+});
+'''
+    return PlainTextResponse(
+        content=sw_code.strip(),
+        media_type="application/javascript"
+    )
 
 
 # === Local development ===
