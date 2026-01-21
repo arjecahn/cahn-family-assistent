@@ -748,16 +748,73 @@ async def tasks_pwa():
             font-size: 16px;
             cursor: pointer;
         }
+
+        /* Fenna's katjes */
+        .cats-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            overflow: hidden;
+            z-index: 0;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+        .cats-container.active { opacity: 1; }
+        .cat {
+            position: absolute;
+            font-size: 24px;
+            animation: float 6s ease-in-out infinite;
+            opacity: 0.6;
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0) rotate(0deg); }
+            25% { transform: translateY(-15px) rotate(5deg); }
+            50% { transform: translateY(-5px) rotate(-3deg); }
+            75% { transform: translateY(-20px) rotate(3deg); }
+        }
+
+        /* Nora's pinguïn */
+        .penguin-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            font-size: 120px;
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0;
+            transition: opacity 0.5s, transform 0.5s;
+            transform: translateY(20px);
+        }
+        .penguin-container.active {
+            opacity: 1;
+            transform: translateY(0);
+            animation: waddle 2s ease-in-out infinite;
+        }
+        @keyframes waddle {
+            0%, 100% { transform: rotate(-3deg); }
+            50% { transform: rotate(3deg); }
+        }
+
+        .picker button[data-member="Fenna"].active::after { content: ' 🐱'; }
+        .picker button[data-member="Nora"].active::after { content: ' 🐧'; }
     </style>
 </head>
 <body>
+    <!-- Fenna's zwevende katjes -->
+    <div class="cats-container" id="catsContainer"></div>
+    <!-- Nora's grote pinguïn -->
+    <div class="penguin-container" id="penguinContainer">🐧</div>
+
     <div class="container">
         <h1>Huishoudtaken</h1>
 
         <div class="picker" id="picker">
-            <button onclick="selectMember('Nora')">Nora</button>
-            <button onclick="selectMember('Linde')">Linde</button>
-            <button onclick="selectMember('Fenna')">Fenna</button>
+            <button data-member="Nora" onclick="selectMember('Nora')">Nora</button>
+            <button data-member="Linde" onclick="selectMember('Linde')">Linde</button>
+            <button data-member="Fenna" onclick="selectMember('Fenna')">Fenna</button>
         </div>
 
         <div class="card">
@@ -782,6 +839,23 @@ async def tasks_pwa():
     <script>
         const API = '';
         let currentMember = localStorage.getItem('member');
+        const catEmojis = ['🐱', '😺', '😸', '🐈', '🐈‍⬛', '😻', '🙀', '😹'];
+
+        // Genereer zwevende katjes voor Fenna
+        function initCats() {
+            const container = document.getElementById('catsContainer');
+            for (let i = 0; i < 12; i++) {
+                const cat = document.createElement('div');
+                cat.className = 'cat';
+                cat.textContent = catEmojis[Math.floor(Math.random() * catEmojis.length)];
+                cat.style.left = Math.random() * 100 + '%';
+                cat.style.top = Math.random() * 100 + '%';
+                cat.style.animationDelay = (Math.random() * 6) + 's';
+                cat.style.fontSize = (18 + Math.random() * 16) + 'px';
+                container.appendChild(cat);
+            }
+        }
+        initCats();
 
         if (currentMember) {
             selectMember(currentMember);
@@ -791,8 +865,13 @@ async def tasks_pwa():
             currentMember = name;
             localStorage.setItem('member', name);
             document.querySelectorAll('.picker button').forEach(b => {
-                b.classList.toggle('active', b.textContent === name);
+                b.classList.toggle('active', b.dataset.member === name);
             });
+
+            // Toon katjes voor Fenna, pinguïn voor Nora
+            document.getElementById('catsContainer').classList.toggle('active', name === 'Fenna');
+            document.getElementById('penguinContainer').classList.toggle('active', name === 'Nora');
+
             loadTasks();
         }
 

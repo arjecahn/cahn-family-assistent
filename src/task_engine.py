@@ -164,7 +164,12 @@ class TaskEngine:
 
         # Recency score: 0 = net gedaan, 1 = lang geleden of nooit
         if last_did:
-            days_ago = (now_local() - last_did).days
+            # Zorg dat beide timezone-aware zijn voor vergelijking
+            now = now_local()
+            if last_did.tzinfo is None:
+                # Database gaf naive datetime, maak aware
+                last_did = last_did.replace(tzinfo=TIMEZONE)
+            days_ago = (now - last_did).days
             recency_score = min(days_ago / 7, 1.0)
         else:
             recency_score = 1.0
@@ -304,6 +309,9 @@ class TaskEngine:
             # Dagen sinds laatste keer
             last_completion = self.get_last_completion(member, task)
             if last_completion:
+                # Zorg dat beide timezone-aware zijn
+                if last_completion.tzinfo is None:
+                    last_completion = last_completion.replace(tzinfo=TIMEZONE)
                 days_since = (now_local() - last_completion).days
                 if days_since == 0:
                     days_text = "vandaag"
