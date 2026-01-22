@@ -2228,6 +2228,27 @@ async def tasks_pwa():
                 </button>
                 <div id="regenerateResult"></div>
             </div>
+
+            <div class="card" style="margin-top:16px;">
+                <h2 style="margin-bottom:16px;color:#1e293b;">📆 Kalender abonnement</h2>
+                <p style="color:#64748b;font-size:14px;margin-bottom:16px;">
+                    Voeg je taken toe aan je telefoon-kalender. Kies jouw naam en krijg een herinnering 15 min van tevoren.
+                </p>
+                <div style="display:flex;flex-direction:column;gap:10px;">
+                    <button class="submit-btn calendar-btn" onclick="subscribeCalendar('nora')" style="background:#ec4899;">
+                        📅 Nora's kalender
+                    </button>
+                    <button class="submit-btn calendar-btn" onclick="subscribeCalendar('linde')" style="background:#8b5cf6;">
+                        📅 Linde's kalender
+                    </button>
+                    <button class="submit-btn calendar-btn" onclick="subscribeCalendar('fenna')" style="background:#06b6d4;">
+                        📅 Fenna's kalender
+                    </button>
+                </div>
+                <p style="color:#94a3b8;font-size:12px;margin-top:12px;text-align:center;">
+                    Tip: Je kunt de URL ook kopiëren en plakken in je kalender-app.
+                </p>
+            </div>
         </div>
 
         <!-- Nora's pinguïn onderaan content -->
@@ -4032,6 +4053,23 @@ async def tasks_pwa():
                 result.innerHTML = '<div class="error-msg">Kon rooster niet herplannen</div>';
             }
         }
+
+        function subscribeCalendar(memberName) {
+            // Bouw de webcal URL (werkt voor zowel iOS als Android)
+            const calendarUrl = API + '/api/calendar/' + memberName + '.ics';
+            const webcalUrl = calendarUrl.replace('https://', 'webcal://').replace('http://', 'webcal://');
+
+            // Probeer webcal protocol (native kalender-app)
+            window.location.href = webcalUrl;
+
+            // Toon ook de URL zodat gebruikers kunnen kopiëren
+            setTimeout(() => {
+                const copied = prompt(
+                    'Kalender URL (kopieer deze als je kalender-app niet automatisch opende):',
+                    calendarUrl
+                );
+            }, 1000);
+        }
     </script>
     <script>
         // Register Service Worker
@@ -4194,6 +4232,54 @@ async def get_calendar_feed():
         media_type="text/calendar",
         headers={
             "Content-Disposition": "attachment; filename=cahn-taken.ics",
+            "Cache-Control": "no-cache, max-age=300"  # 5 min cache
+        }
+    )
+
+
+@app.get("/api/calendar/{member_name}.ics")
+async def get_member_calendar_feed(member_name: str):
+    """
+    Persoonlijke iCal feed voor één gezinslid.
+
+    Subscribe URLs:
+    - https://cahn-family-assistent.vercel.app/api/calendar/nora.ics
+    - https://cahn-family-assistent.vercel.app/api/calendar/linde.ics
+    - https://cahn-family-assistent.vercel.app/api/calendar/fenna.ics
+
+    Elk kind kan hun eigen URL toevoegen aan hun kalender app.
+    De kalender toont alleen hun taken met reminders 15 min van tevoren.
+    """
+    # Valideer member naam
+    valid_members = ["nora", "linde", "fenna"]
+    member_lower = member_name.lower()
+
+    if member_lower not in valid_members:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Onbekend gezinslid: {member_name}. Kies uit: Nora, Linde, Fenna"
+        )
+
+    # Kapitaliseer naam voor weergave
+    member_display = member_lower.capitalize()
+
+    schedule_data = engine.get_week_schedule()
+
+    # Haal emails op
+    members = get_all_members()
+    member_emails = {m.name: m.email for m in members if m.email}
+
+    cal = generate_ical(
+        schedule_data["schedule"],
+        member_emails,
+        filter_member=member_display
+    )
+
+    return Response(
+        content=cal.to_ical(),
+        media_type="text/calendar",
+        headers={
+            "Content-Disposition": f"attachment; filename=taken-{member_lower}.ics",
             "Cache-Control": "no-cache, max-age=300"  # 5 min cache
         }
     )
