@@ -2162,7 +2162,7 @@ async def tasks_pwa():
             <div class="card" style="margin-top:16px;">
                 <h2 style="margin-bottom:16px;color:#1e293b;">📅 Geplande afwezigheden</h2>
                 <div id="upcomingAbsences">
-                    <div class="loading">Laden...</div>
+                    <div class="loading"><div class="spinner"></div>Laden...</div>
                 </div>
             </div>
         </div>
@@ -3843,6 +3843,8 @@ async def tasks_pwa():
                 return;
             }
 
+            result.innerHTML = '<div class="loading"><div class="spinner"></div>Opslaan...</div>';
+
             try {
                 const res = await fetch(API + '/api/absence', {
                     method: 'POST',
@@ -3890,7 +3892,7 @@ async def tasks_pwa():
 
         async function loadUpcomingAbsences() {
             const container = document.getElementById('upcomingAbsences');
-            container.innerHTML = '<div class="loading">Laden...</div>';
+            container.innerHTML = '<div class="loading"><div class="spinner"></div>Laden...</div>';
 
             try {
                 const res = await fetch(API + '/api/absences/upcoming');
