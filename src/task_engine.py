@@ -1,4 +1,5 @@
 """Core logica voor eerlijke takenverdeling."""
+import random
 from datetime import date, datetime, timedelta
 from typing import Optional
 from dataclasses import dataclass
@@ -1824,7 +1825,13 @@ class TaskEngine:
             return (month_task_count, week_count)
 
         sorted_eligible = sorted(eligible, key=sort_key)
-        return sorted_eligible[0]
+
+        # Randomiseer tussen leden met gelijke scores om variatie te krijgen
+        # Dit voorkomt dat dezelfde persoon steeds dezelfde taak krijgt
+        best_score = sort_key(sorted_eligible[0])
+        tied_members = [m for m in sorted_eligible if sort_key(m) == best_score]
+
+        return random.choice(tied_members)
 
     def _is_blocked_by_rule(self, member_name: str, task_name: str,
                             day_of_week: int, custom_rules: list) -> bool:
