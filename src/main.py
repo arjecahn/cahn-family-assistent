@@ -3062,6 +3062,7 @@ async def tasks_pwa():
         const megaEffects = ['fireworks', 'rainbow', 'matrix', 'hearts', 'stars'];
 
         function triggerMegaCelebration() {
+            if (localStorage.getItem('disableEmojis') === 'true') return;
             if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 200, 100, 300]);
 
             const message = megaMessages[Math.floor(Math.random() * megaMessages.length)];
@@ -3148,6 +3149,7 @@ async def tasks_pwa():
         }
 
         function createFireworks(colors) {
+            if (localStorage.getItem('disableEmojis') === 'true') return;
             for (let i = 0; i < 8; i++) {
                 setTimeout(() => {
                     const x = Math.random() * window.innerWidth;
@@ -3186,6 +3188,7 @@ async def tasks_pwa():
         }
 
         function createRainbow() {
+            if (localStorage.getItem('disableEmojis') === 'true') return;
             const rainbow = document.createElement('div');
             rainbow.style.cssText = `
                 position: fixed; top: -50%; left: -25%; width: 150%; height: 150%;
@@ -3204,6 +3207,7 @@ async def tasks_pwa():
         }
 
         function createMatrix(color) {
+            if (localStorage.getItem('disableEmojis') === 'true') return;
             const container = document.createElement('div');
             container.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10001;overflow:hidden;';
             document.body.appendChild(container);
