@@ -2319,6 +2319,13 @@ async def tasks_pwa():
                 <button class="submit-btn" onclick="submitSwap()" style="background:#f59e0b;">🔄 Ruilen</button>
                 <div id="swapResult"></div>
             </div>
+
+            <div class="card" style="margin-top:16px;">
+                <label style="display:flex;align-items:center;gap:12px;cursor:pointer;">
+                    <input type="checkbox" id="disableEmojis" onchange="toggleEmojis()" style="width:20px;height:20px;">
+                    <span style="color:#64748b;font-size:14px;">Enough with the flying emojis! 🙄</span>
+                </label>
+            </div>
         </div>
 
         <!-- Nora's pinguïn onderaan content -->
@@ -2508,6 +2515,7 @@ async def tasks_pwa():
         }
 
         function createMiniSparkles(x, y, emoji) {
+            if (localStorage.getItem('disableEmojis') === 'true') return;
             for (let i = 0; i < 6; i++) {
                 const spark = document.createElement('div');
                 spark.textContent = emoji;
@@ -2976,6 +2984,7 @@ async def tasks_pwa():
         }
 
         function createConfetti(x, y) {
+            if (localStorage.getItem('disableEmojis') === 'true') return;
             const container = document.createElement('div');
             container.className = 'confetti-container';
             document.body.appendChild(container);
@@ -3012,6 +3021,7 @@ async def tasks_pwa():
         }
 
         function createSparkles(x, y) {
+            if (localStorage.getItem('disableEmojis') === 'true') return;
             const sparkles = ['✨', '⭐', '🌟', '💫', '✧', '★'];
             for (let i = 0; i < 8; i++) {
                 const sparkle = document.createElement('div');
@@ -4041,6 +4051,17 @@ async def tasks_pwa():
         // === RUILEN ===
         // Zet standaard datum op vandaag
         document.getElementById('swapDate').value = new Date().toISOString().split('T')[0];
+
+        // === EMOJI VOORKEUR ===
+        // Laad voorkeur uit localStorage
+        if (localStorage.getItem('disableEmojis') === 'true') {
+            document.getElementById('disableEmojis').checked = true;
+        }
+
+        function toggleEmojis() {
+            const disabled = document.getElementById('disableEmojis').checked;
+            localStorage.setItem('disableEmojis', disabled ? 'true' : 'false');
+        }
 
         async function submitSwap() {
             const swapDate = document.getElementById('swapDate').value;
