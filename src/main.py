@@ -3890,6 +3890,9 @@ async def tasks_pwa():
         async function deleteAbsence(id) {
             if (!confirm('Weet je zeker dat je deze afwezigheid wilt verwijderen?')) return;
 
+            const container = document.getElementById('upcomingAbsences');
+            container.innerHTML = '<div class="loading"><div class="spinner"></div>Verwijderen...</div>';
+
             try {
                 const res = await fetch(API + '/api/absence/' + id, { method: 'DELETE' });
                 const data = await res.json();
@@ -3897,9 +3900,11 @@ async def tasks_pwa():
                     loadUpcomingAbsences();
                 } else {
                     alert(data.detail || 'Kon niet verwijderen');
+                    loadUpcomingAbsences();
                 }
             } catch (e) {
                 alert('Fout bij verwijderen');
+                loadUpcomingAbsences();
             }
         }
 
