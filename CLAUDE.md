@@ -239,3 +239,35 @@ curl -X POST https://cahn-family-assistent.vercel.app/api/tasks/reset-2026
 ```
 
 **Let op:** Dit verwijdert alle bestaande voltooide taken!
+
+## PWA (`/taken`)
+
+De app heeft een Progressive Web App op `/taken` met de volgende features:
+
+### Kalender Feeds (iCal)
+- `/api/calendar.ics` - Alle taken
+- `/api/calendar/{naam}.ics` - Persoonlijke feed (nora, linde, fenna)
+- Bevat VALARM reminders (15 min van tevoren)
+- **Let op**: Kalender-apps (Google Calendar, Apple Calendar) hebben eigen refresh intervals (12-24 uur). De PWA is betrouwbaarder voor real-time updates.
+
+### Animaties/Effecten
+De PWA heeft veel visuele effecten die allemaal uitgeschakeld kunnen worden via de checkbox "Enough with the flying emojis!" (opgeslagen in localStorage als `disableEmojis`).
+
+**Effecten die de check nodig hebben:**
+- `initCats()`, `initOtters()`, `initBears()` - Zwevende dieren per kind
+- `createConfetti()`, `createSparkles()`, `createMiniSparkles()` - Bij taak voltooien
+- `triggerMegaCelebration()` - Als alle taken klaar zijn
+- `createFireworks()`, `createRainbow()`, `createMatrix()` - Mega celebration effecten
+
+Bij nieuwe effecten: voeg `if (localStorage.getItem('disableEmojis') === 'true') return;` toe.
+
+## Development Learnings
+
+### Task Scheduling Randomisatie
+Bij het genereren van het weekrooster (`_generate_new_schedule`):
+- `member_month_task_counts` moet worden bijgewerkt NA elke toewijzing
+- Anders krijgt dezelfde persoon steeds dezelfde taak
+- Bij gelijke scores: gebruik `random.choice()` voor variatie
+
+### Swap Functionaliteit (WIP)
+Er is een `/api/swap/same-day` endpoint maar de UI is tijdelijk uitgeschakeld (commented out in main.py). Moet nog getest/verbeterd worden.
