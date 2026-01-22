@@ -2235,19 +2235,32 @@ async def tasks_pwa():
                     Voeg je taken toe aan je telefoon-kalender. Kies jouw naam en krijg een herinnering 15 min van tevoren.
                 </p>
                 <div style="display:flex;flex-direction:column;gap:10px;">
-                    <button class="submit-btn calendar-btn" onclick="subscribeCalendar('nora')" style="background:#ec4899;">
-                        📅 Nora's kalender
-                    </button>
-                    <button class="submit-btn calendar-btn" onclick="subscribeCalendar('linde')" style="background:#8b5cf6;">
-                        📅 Linde's kalender
-                    </button>
-                    <button class="submit-btn calendar-btn" onclick="subscribeCalendar('fenna')" style="background:#06b6d4;">
-                        📅 Fenna's kalender
-                    </button>
+                    <div style="display:flex;gap:8px;">
+                        <button class="submit-btn" onclick="subscribeCalendar('nora')" style="background:#ec4899;flex:1;">
+                            📅 Nora
+                        </button>
+                        <button class="submit-btn" onclick="copyCalendarUrl('nora')" style="background:#f9a8d4;padding:14px 16px;" title="Kopieer URL">
+                            📋
+                        </button>
+                    </div>
+                    <div style="display:flex;gap:8px;">
+                        <button class="submit-btn" onclick="subscribeCalendar('linde')" style="background:#8b5cf6;flex:1;">
+                            📅 Linde
+                        </button>
+                        <button class="submit-btn" onclick="copyCalendarUrl('linde')" style="background:#c4b5fd;padding:14px 16px;" title="Kopieer URL">
+                            📋
+                        </button>
+                    </div>
+                    <div style="display:flex;gap:8px;">
+                        <button class="submit-btn" onclick="subscribeCalendar('fenna')" style="background:#06b6d4;flex:1;">
+                            📅 Fenna
+                        </button>
+                        <button class="submit-btn" onclick="copyCalendarUrl('fenna')" style="background:#67e8f9;padding:14px 16px;" title="Kopieer URL">
+                            📋
+                        </button>
+                    </div>
                 </div>
-                <p style="color:#94a3b8;font-size:12px;margin-top:12px;text-align:center;">
-                    Tip: Je kunt de URL ook kopiëren en plakken in je kalender-app.
-                </p>
+                <div id="copyResult" style="margin-top:12px;text-align:center;font-size:13px;"></div>
             </div>
         </div>
 
@@ -4056,21 +4069,31 @@ async def tasks_pwa():
             }
         }
 
+        function getCalendarUrl(memberName) {
+            // Gebruik window.location.origin voor volledige URL
+            return window.location.origin + '/api/calendar/' + memberName + '.ics';
+        }
+
         function subscribeCalendar(memberName) {
-            // Bouw de webcal URL (werkt voor zowel iOS als Android)
-            const calendarUrl = API + '/api/calendar/' + memberName + '.ics';
+            const calendarUrl = getCalendarUrl(memberName);
             const webcalUrl = calendarUrl.replace('https://', 'webcal://').replace('http://', 'webcal://');
 
             // Probeer webcal protocol (native kalender-app)
             window.location.href = webcalUrl;
+        }
 
-            // Toon ook de URL zodat gebruikers kunnen kopiëren
-            setTimeout(() => {
-                const copied = prompt(
-                    'Kalender URL (kopieer deze als je kalender-app niet automatisch opende):',
-                    calendarUrl
-                );
-            }, 1000);
+        async function copyCalendarUrl(memberName) {
+            const calendarUrl = getCalendarUrl(memberName);
+            const resultEl = document.getElementById('copyResult');
+
+            try {
+                await navigator.clipboard.writeText(calendarUrl);
+                resultEl.innerHTML = '<span style="color:#22c55e;">✅ URL gekopieerd!</span>';
+                setTimeout(() => { resultEl.innerHTML = ''; }, 3000);
+            } catch (e) {
+                // Fallback voor browsers zonder clipboard API
+                prompt('Kopieer deze URL:', calendarUrl);
+            }
         }
     </script>
     <script>
