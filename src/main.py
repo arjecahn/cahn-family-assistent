@@ -2272,6 +2272,7 @@ async def tasks_pwa():
                 <div id="copyResult" style="margin-top:12px;text-align:center;font-size:13px;"></div>
             </div>
 
+            <!-- Tijdelijk uitgeschakeld
             <div class="card" style="margin-top:16px;">
                 <h2 style="margin-bottom:16px;color:#1e293b;">🔄 Taken ruilen</h2>
                 <p style="color:#64748b;font-size:14px;margin-bottom:16px;">
@@ -2319,6 +2320,7 @@ async def tasks_pwa():
                 <button class="submit-btn" onclick="submitSwap()" style="background:#f59e0b;">🔄 Ruilen</button>
                 <div id="swapResult"></div>
             </div>
+            -->
 
             <div class="card" style="margin-top:16px;">
                 <label style="display:flex;align-items:center;gap:12px;cursor:pointer;">
@@ -4052,9 +4054,11 @@ async def tasks_pwa():
             }
         }
 
-        // === RUILEN ===
+        // === RUILEN === (tijdelijk uitgeschakeld)
         // Zet standaard datum op vandaag
-        document.getElementById('swapDate').value = new Date().toISOString().split('T')[0];
+        if (document.getElementById('swapDate')) {
+            document.getElementById('swapDate').value = new Date().toISOString().split('T')[0];
+        }
 
         // === EMOJI VOORKEUR ===
         // Laad voorkeur uit localStorage
