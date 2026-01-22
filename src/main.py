@@ -2410,6 +2410,7 @@ async def tasks_pwa():
 
         // Genereer zwevende katjes voor Fenna
         function initCats() {
+            if (localStorage.getItem('disableEmojis') === 'true') return;
             const container = document.getElementById('catsContainer');
             for (let i = 0; i < 12; i++) {
                 const cat = document.createElement('div');
@@ -2427,6 +2428,7 @@ async def tasks_pwa():
 
         // Genereer zwevende otters voor Nora (rond de pinguïn)
         function initOtters() {
+            if (localStorage.getItem('disableEmojis') === 'true') return;
             const container = document.getElementById('ottersContainer');
             for (let i = 0; i < 10; i++) {
                 const otter = document.createElement('div');
@@ -2444,6 +2446,7 @@ async def tasks_pwa():
 
         // Genereer beren en honing voor Linde
         function initBears() {
+            if (localStorage.getItem('disableEmojis') === 'true') return;
             const container = document.getElementById('bearsContainer');
             for (let i = 0; i < 12; i++) {
                 const bear = document.createElement('div');
@@ -4069,6 +4072,16 @@ async def tasks_pwa():
         function toggleEmojis() {
             const disabled = document.getElementById('disableEmojis').checked;
             localStorage.setItem('disableEmojis', disabled ? 'true' : 'false');
+
+            // Verwijder bestaande zwevende emojis direct
+            if (disabled) {
+                document.getElementById('catsContainer').innerHTML = '';
+                document.getElementById('ottersContainer').innerHTML = '';
+                document.getElementById('bearsContainer').innerHTML = '';
+            } else {
+                // Herlaad de pagina om ze terug te krijgen
+                location.reload();
+            }
         }
 
         async function submitSwap() {
