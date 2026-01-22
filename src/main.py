@@ -4402,7 +4402,7 @@ async def get_calendar_feed():
         media_type="text/calendar",
         headers={
             "Content-Disposition": "attachment; filename=cahn-taken.ics",
-            "Cache-Control": "no-cache, max-age=300"  # 5 min cache
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
         }
     )
 
@@ -4450,7 +4450,7 @@ async def get_member_calendar_feed(member_name: str):
         media_type="text/calendar",
         headers={
             "Content-Disposition": f"attachment; filename=taken-{member_lower}.ics",
-            "Cache-Control": "no-cache, max-age=300"  # 5 min cache
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
         }
     )
 
