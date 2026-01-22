@@ -1729,6 +1729,11 @@ class TaskEngine:
 
                     if assigned:
                         member_week_counts[assigned.name] += 1
+                        # Update ook de maandelijkse taak-telling zodat de volgende dag
+                        # weet dat deze persoon deze taak al heeft gedaan
+                        if assigned.name in member_month_task_counts:
+                            task_counts = member_month_task_counts[assigned.name]
+                            task_counts[task.display_name] = task_counts.get(task.display_name, 0) + 1
                         # Blokkeer tijdslot(s) - sommige taken blokkeren meerdere slots
                         blocked_slots = TASK_BLOCKS_SLOTS.get(task.name, [task.time_of_day])
                         for slot in blocked_slots:
