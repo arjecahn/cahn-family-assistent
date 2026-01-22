@@ -266,6 +266,15 @@ class SwapResponse(BaseModel):
     accept: bool
 
 
+class SameDaySwapRequest(BaseModel):
+    """Direct ruilen van taken op dezelfde dag."""
+    member1_name: str
+    member1_task: str
+    member2_name: str
+    member2_task: str
+    swap_date: date
+
+
 class UndoRequest(BaseModel):
     member_name: str
 
@@ -2262,6 +2271,54 @@ async def tasks_pwa():
                 </div>
                 <div id="copyResult" style="margin-top:12px;text-align:center;font-size:13px;"></div>
             </div>
+
+            <div class="card" style="margin-top:16px;">
+                <h2 style="margin-bottom:16px;color:#1e293b;">🔄 Taken ruilen</h2>
+                <p style="color:#64748b;font-size:14px;margin-bottom:16px;">
+                    Willen jullie ruilen? Spreek het eerst even af en vul dan hieronder in wie wat ruilt.
+                </p>
+                <div class="form-group">
+                    <label>Datum</label>
+                    <input type="date" id="swapDate">
+                </div>
+                <div style="display:flex;gap:12px;margin-bottom:16px;">
+                    <div style="flex:1;">
+                        <div class="form-group">
+                            <label>Kind 1</label>
+                            <select id="swapMember1">
+                                <option value="Nora">Nora</option>
+                                <option value="Linde">Linde</option>
+                                <option value="Fenna">Fenna</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Geeft taak</label>
+                            <select id="swapTask1">
+                                <option value="">Laden...</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="display:flex;align-items:center;font-size:24px;padding-top:20px;">⇄</div>
+                    <div style="flex:1;">
+                        <div class="form-group">
+                            <label>Kind 2</label>
+                            <select id="swapMember2">
+                                <option value="Linde">Linde</option>
+                                <option value="Nora">Nora</option>
+                                <option value="Fenna">Fenna</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Geeft taak</label>
+                            <select id="swapTask2">
+                                <option value="">Laden...</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <button class="submit-btn" onclick="submitSwap()" style="background:#f59e0b;">🔄 Ruilen</button>
+                <div id="swapResult"></div>
+            </div>
         </div>
 
         <!-- Nora's pinguïn onderaan content -->
@@ -3964,8 +4021,70 @@ async def tasks_pwa():
                 tasks.forEach(t => {
                     select.innerHTML += '<option value="' + t.display_name + '">' + t.display_name + '</option>';
                 });
+
+                // Vul ook de swap task dropdowns
+                const swap1 = document.getElementById('swapTask1');
+                const swap2 = document.getElementById('swapTask2');
+                if (swap1 && swap2) {
+                    swap1.innerHTML = '<option value="">Kies taak...</option>';
+                    swap2.innerHTML = '<option value="">Kies taak...</option>';
+                    tasks.forEach(t => {
+                        swap1.innerHTML += '<option value="' + t.display_name + '">' + t.display_name + '</option>';
+                        swap2.innerHTML += '<option value="' + t.display_name + '">' + t.display_name + '</option>';
+                    });
+                }
             } catch (e) {
                 console.error('Kon taken niet laden', e);
+            }
+        }
+
+        // === RUILEN ===
+        // Zet standaard datum op vandaag
+        document.getElementById('swapDate').value = new Date().toISOString().split('T')[0];
+
+        async function submitSwap() {
+            const swapDate = document.getElementById('swapDate').value;
+            const member1 = document.getElementById('swapMember1').value;
+            const task1 = document.getElementById('swapTask1').value;
+            const member2 = document.getElementById('swapMember2').value;
+            const task2 = document.getElementById('swapTask2').value;
+            const result = document.getElementById('swapResult');
+
+            if (!swapDate || !task1 || !task2) {
+                result.innerHTML = '<div class="error-msg">Vul alle velden in</div>';
+                return;
+            }
+
+            if (member1 === member2) {
+                result.innerHTML = '<div class="error-msg">Kies twee verschillende kinderen</div>';
+                return;
+            }
+
+            result.innerHTML = '<div class="loading"><div class="spinner"></div>Ruilen...</div>';
+
+            try {
+                const res = await fetch(API + '/api/swap/same-day', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        member1_name: member1,
+                        member1_task: task1,
+                        member2_name: member2,
+                        member2_task: task2,
+                        swap_date: swapDate
+                    })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    result.innerHTML = '<div class="success-msg">✅ ' + data.message + '</div>';
+                    // Reset form
+                    document.getElementById('swapTask1').value = '';
+                    document.getElementById('swapTask2').value = '';
+                } else {
+                    result.innerHTML = '<div class="error-msg">' + (data.detail || 'Fout bij ruilen') + '</div>';
+                }
+            } catch (e) {
+                result.innerHTML = '<div class="error-msg">Kon niet ruilen</div>';
             }
         }
 
@@ -4379,6 +4498,29 @@ async def get_pending_swaps(member_name: str):
         }
         for s in swaps
     ]
+
+
+@app.post("/api/swap/same-day")
+async def swap_tasks_same_day(request: SameDaySwapRequest):
+    """Ruil taken tussen twee kinderen op dezelfde dag.
+
+    Dit is een directe ruil - geen verzoek/acceptatie nodig.
+    Bedoeld voor wanneer kinderen onderling afspreken te ruilen.
+    """
+    try:
+        result = engine.swap_same_day_tasks(
+            member1_name=request.member1_name,
+            member1_task=request.member1_task,
+            member2_name=request.member2_name,
+            member2_task=request.member2_task,
+            swap_date=request.swap_date
+        )
+        return {
+            "success": True,
+            "message": f"Geruild! {request.member1_name} doet nu {request.member2_task}, {request.member2_name} doet nu {request.member1_task}"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # === Verzaakte Taken ===

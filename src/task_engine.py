@@ -1014,6 +1014,54 @@ class TaskEngine:
             return []
         return db.get_pending_swaps_for_member(member.id)
 
+    def swap_same_day_tasks(self, member1_name: str, member1_task: str,
+                            member2_name: str, member2_task: str,
+                            swap_date: date) -> dict:
+        """Ruil taken tussen twee kinderen op dezelfde dag.
+
+        Dit past de schedule_assignments aan zodat de taken worden geruild.
+        """
+        member1 = db.get_member_by_name(member1_name)
+        member2 = db.get_member_by_name(member2_name)
+
+        if not member1:
+            raise ValueError(f"Gezinslid '{member1_name}' niet gevonden")
+        if not member2:
+            raise ValueError(f"Gezinslid '{member2_name}' niet gevonden")
+        if member1.id == member2.id:
+            raise ValueError("Je kunt niet met jezelf ruilen!")
+
+        task1 = db.get_task_by_name(member1_task)
+        task2 = db.get_task_by_name(member2_task)
+
+        if not task1:
+            raise ValueError(f"Taak '{member1_task}' niet gevonden")
+        if not task2:
+            raise ValueError(f"Taak '{member2_task}' niet gevonden")
+
+        week_number = swap_date.isocalendar()[1]
+        year = swap_date.isocalendar()[0]
+        day_of_week = swap_date.weekday()
+
+        # Update de assignments in de database
+        db.swap_schedule_assignments(
+            week_number=week_number,
+            year=year,
+            day_of_week=day_of_week,
+            member1_id=member1.id,
+            task1_id=task1.id,
+            member2_id=member2.id,
+            task2_id=task2.id
+        )
+
+        return {
+            "success": True,
+            "member1": member1_name,
+            "member1_new_task": member2_task,
+            "member2": member2_name,
+            "member2_new_task": member1_task
+        }
+
     def undo_task_completion(self, member_name: str, task_name: str,
                               completed_date: Optional[date] = None) -> dict:
         """Maak een specifieke taak voltooiing ongedaan.

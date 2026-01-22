@@ -1199,6 +1199,53 @@ def delete_assignment(assignment_id: str) -> bool:
     return deleted
 
 
+def swap_schedule_assignments(week_number: int, year: int, day_of_week: int,
+                               member1_id: int, task1_id: int,
+                               member2_id: int, task2_id: int) -> bool:
+    """Ruil twee taken tussen twee leden op dezelfde dag.
+
+    Vindt de assignments voor member1+task1 en member2+task2,
+    en verwisselt de member_id/member_name.
+    """
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Haal member namen op
+    cur.execute("SELECT name FROM members WHERE id = %s", (member1_id,))
+    row1 = cur.fetchone()
+    cur.execute("SELECT name FROM members WHERE id = %s", (member2_id,))
+    row2 = cur.fetchone()
+
+    if not row1 or not row2:
+        cur.close()
+        conn.close()
+        return False
+
+    member1_name = row1['name']
+    member2_name = row2['name']
+
+    # Update task1: was van member1, wordt van member2
+    cur.execute("""
+        UPDATE schedule_assignments
+        SET member_id = %s, member_name = %s
+        WHERE week_number = %s AND year = %s AND day_of_week = %s
+          AND task_id = %s AND member_id = %s
+    """, (member2_id, member2_name, week_number, year, day_of_week, task1_id, member1_id))
+
+    # Update task2: was van member2, wordt van member1
+    cur.execute("""
+        UPDATE schedule_assignments
+        SET member_id = %s, member_name = %s
+        WHERE week_number = %s AND year = %s AND day_of_week = %s
+          AND task_id = %s AND member_id = %s
+    """, (member1_id, member1_name, week_number, year, day_of_week, task2_id, member2_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    return True
+
+
 def get_assignments_for_day(week_number: int, year: int, day_of_week: int) -> list[ScheduleAssignment]:
     """Haal alle assignments op voor een specifieke dag."""
     conn = get_db()
