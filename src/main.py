@@ -4483,7 +4483,7 @@ async def tasks_pwa():
             }
         }
 
-        async function claimBonusTask(taskId) {
+        async function claimBonusTask(taskId, event) {
             if (!currentMember) {
                 alert('Kies eerst je naam');
                 return;
@@ -4498,9 +4498,11 @@ async def tasks_pwa():
 
                 if (res.ok) {
                     // Celebration!
-                    const btn = event.target;
-                    const rect = btn.getBoundingClientRect();
-                    createConfetti(rect.left + rect.width/2, rect.top);
+                    if (event && event.target) {
+                        const btn = event.target;
+                        const rect = btn.getBoundingClientRect();
+                        createConfetti(rect.left + rect.width/2, rect.top);
+                    }
                     if (navigator.vibrate) navigator.vibrate([50, 30, 100]);
 
                     invalidateAllCache();
@@ -4547,7 +4549,7 @@ async def tasks_pwa():
                 html += '<div class="bonus-task-name">' + t.name + '</div>';
                 html += '<div class="bonus-task-date">📅 Liefst ' + dayName + '</div>';
                 html += '</div>';
-                html += '<button class="bonus-claim-btn" onclick="claimBonusTask(' + t.id + ')">Ik doe!</button>';
+                html += '<button class="bonus-claim-btn" onclick="claimBonusTask(' + t.id + ', event)">Ik doe!</button>';
                 html += '</div>';
             });
 
