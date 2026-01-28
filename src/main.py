@@ -1437,6 +1437,9 @@ async def rich_statistics():
         # Bonus task achievement
         if name in bonus_week and bonus_week[name] >= 2:
             achievements.append({"member": name, "badge": "⭐", "text": f"{bonus_week[name]} bonustaken deze week!"})
+        # Best streak achievement (only show if better than current and at least 3)
+        if data["best_streak"] >= 3 and data["best_streak"] > data["streak"]:
+            achievements.append({"member": name, "badge": "👑", "text": f"Record: {data['best_streak']} dagen streak!"})
 
     stats["achievements"] = achievements
 
