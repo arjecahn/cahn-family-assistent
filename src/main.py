@@ -4792,38 +4792,26 @@ async def tasks_pwa():
                 return;
             }
 
-            // Bepaal welke member(s) we testen
-            const testMembers = savedPushMembers === 'all'
-                ? ['Nora', 'Linde', 'Fenna']
-                : [savedPushMembers];
-
             try {
                 resultEl.innerHTML = '<span style="color:#64748b;">Test versturen... (even geduld)</span>';
 
-                let totalSuccess = 0;
-                let lastData = null;
+                // Roep test endpoint 1x aan - backend stuurt samenvatting naar alle devices
+                const res = await fetch('/api/push/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ member_name: 'test' })
+                });
 
-                for (const member of testMembers) {
-                    const res = await fetch('/api/push/test', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ member_name: member })
-                    });
+                const data = await res.json();
+                console.log('Push test result:', data);
 
-                    if (res.ok) {
-                        const data = await res.json();
-                        lastData = data;
-                        totalSuccess += (data.morning?.success || 0) + (data.evening?.success || 0);
-                    }
-                }
-
-                console.log('Push test total success:', totalSuccess);
+                const totalSuccess = (data.morning?.success || 0) + (data.evening?.success || 0);
 
                 let msg = '';
                 if (totalSuccess > 0) {
                     msg = '<span style="color:#22c55e;">✅ ' + totalSuccess + ' notificatie(s) verstuurd!</span>';
-                } else if (lastData?.morning?.error || lastData?.evening?.error) {
-                    msg = '<span style="color:#ef4444;">' + (lastData.morning?.error || lastData.evening?.error) + '</span>';
+                } else if (data.error) {
+                    msg = '<span style="color:#ef4444;">' + data.error + '</span>';
                 } else {
                     msg = '<span style="color:#ef4444;">Kon niet versturen. Probeer opnieuw in te schakelen.</span>';
                 }
