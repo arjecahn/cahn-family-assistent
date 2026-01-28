@@ -221,9 +221,10 @@ async def push_test(request: PushTestRequest):
     member_tasks = []
     if day_name in schedule.get("schedule", {}):
         day_schedule = schedule["schedule"][day_name]
-        for task_name, assigned_member in day_schedule.items():
-            if assigned_member == request.member_name:
-                member_tasks.append(task_name)
+        # Schedule structuur: {tasks: [{task_name, assigned_to, completed, ...}]}
+        for task in day_schedule.get("tasks", []):
+            if task.get("assigned_to") == request.member_name:
+                member_tasks.append(task.get("task_name"))
 
     # Verzamel openstaande taken (niet afgevinkt vandaag)
     completions = get_completions_for_week(week_number)
@@ -308,9 +309,10 @@ async def send_morning_reminders():
 
         if day_name in schedule.get("schedule", {}):
             day_schedule = schedule["schedule"][day_name]
-            for task_name, assigned_member in day_schedule.items():
-                if assigned_member == member.name:
-                    member_tasks.append(task_name)
+            # Schedule structuur: {tasks: [{task_name, assigned_to, completed, ...}]}
+            for task in day_schedule.get("tasks", []):
+                if task.get("assigned_to") == member.name:
+                    member_tasks.append(task.get("task_name"))
 
         # Stuur notificatie als er taken zijn
         if member_tasks:
@@ -357,8 +359,10 @@ async def send_evening_reminders():
 
         if day_name in schedule.get("schedule", {}):
             day_schedule = schedule["schedule"][day_name]
-            for task_name, assigned_member in day_schedule.items():
-                if assigned_member == member.name:
+            # Schedule structuur: {tasks: [{task_name, assigned_to, completed, ...}]}
+            for task in day_schedule.get("tasks", []):
+                if task.get("assigned_to") == member.name:
+                    task_name = task.get("task_name")
                     if (member.name, task_name) not in completed_today:
                         open_tasks.append(task_name)
 
