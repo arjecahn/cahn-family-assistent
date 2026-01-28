@@ -13,3 +13,6 @@ data/
 !package.json
 !docs/*.json
 .env
+
+# Fiberplane local issue tracking
+.fp/

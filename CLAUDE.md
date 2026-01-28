@@ -271,3 +271,5 @@ Bij het genereren van het weekrooster (`_generate_new_schedule`):
 
 ### Swap Functionaliteit (WIP)
 Er is een `/api/swap/same-day` endpoint maar de UI is tijdelijk uitgeschakeld (commented out in main.py). Moet nog getest/verbeterd worden.
+
+@.fp/FP_CLAUDE.md
