@@ -2107,6 +2107,35 @@ async def tasks_pwa():
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+        /* Refreshing indicator - subtle dots */
+        .refreshing-indicator {
+            text-align: center;
+            padding: 8px;
+            color: #94a3b8;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            opacity: 0;
+            animation: fadeIn 0.3s ease forwards;
+        }
+        @keyframes fadeIn {
+            to { opacity: 1; }
+        }
+        .refreshing-indicator .dot {
+            width: 6px;
+            height: 6px;
+            background: #94a3b8;
+            border-radius: 50%;
+            animation: pulse 1.2s ease-in-out infinite;
+        }
+        .refreshing-indicator .dot:nth-child(2) { animation-delay: 0.2s; }
+        .refreshing-indicator .dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes pulse {
+            0%, 60%, 100% { transform: scale(0.6); opacity: 0.4; }
+            30% { transform: scale(1); opacity: 1; }
+        }
         .summary {
             text-align: center;
             color: #64748b;
@@ -3359,6 +3388,24 @@ async def tasks_pwa():
             });
         }
 
+        function showRefreshingIndicator(containerId) {
+            const container = document.getElementById(containerId);
+            // Verwijder bestaande indicator
+            const existing = container.querySelector('.refreshing-indicator');
+            if (existing) existing.remove();
+            // Voeg nieuwe indicator toe
+            const indicator = document.createElement('div');
+            indicator.className = 'refreshing-indicator';
+            indicator.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
+            container.appendChild(indicator);
+        }
+
+        function hideRefreshingIndicator(containerId) {
+            const container = document.getElementById(containerId);
+            const indicator = container.querySelector('.refreshing-indicator');
+            if (indicator) indicator.remove();
+        }
+
         async function loadTasks() {
             if (!currentMember) return;
 
@@ -3369,6 +3416,8 @@ async def tasks_pwa():
             if (cached) {
                 updateDateDisplay(cached);
                 renderTasks(cached);
+                // Toon subtiele refresh indicator
+                showRefreshingIndicator('tasks');
             } else {
                 // Alleen spinner als er geen cache is
                 document.getElementById('tasks').innerHTML = '<div class="loading"><div class="spinner"></div>Laden...</div>';
@@ -3389,6 +3438,7 @@ async def tasks_pwa():
                     document.getElementById('tasks').innerHTML = '<div class="empty">Fout bij laden</div>';
                 }
             }
+            // Indicator verbergen (renderTasks overschrijft de content, dus al weg)
         }
 
         function renderTasks(data) {
@@ -4054,6 +4104,7 @@ async def tasks_pwa():
             // Direct gecachede data tonen
             if (cached) {
                 renderWeekSchedule(cached);
+                showRefreshingIndicator('weekSchedule');
             } else {
                 container.innerHTML = '<div class="loading"><div class="spinner"></div>Laden...</div>';
             }
@@ -4248,6 +4299,7 @@ async def tasks_pwa():
             if (cached) {
                 statsData = cached;
                 renderStand();
+                showRefreshingIndicator('standContent');
             } else {
                 container.innerHTML = '<div class="loading"><div class="spinner"></div>Laden...</div>';
             }
