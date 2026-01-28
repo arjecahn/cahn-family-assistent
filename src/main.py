@@ -1353,35 +1353,39 @@ async def rich_statistics():
     bonus_month = {name: 0 for name in member_names}
     bonus_alltime = {name: 0 for name in member_names}
 
-    cur.execute("""
-        SELECT completed_by, COUNT(*) as cnt
-        FROM bonus_tasks
-        WHERE week_number = %s AND year = %s AND completed_by IS NOT NULL
-        GROUP BY completed_by
-    """, (current_week, current_year))
-    for r in cur.fetchall():
-        if r["completed_by"] in bonus_week:
-            bonus_week[r["completed_by"]] = r["cnt"]
+    try:
+        cur.execute("""
+            SELECT completed_by, COUNT(*) as cnt
+            FROM bonus_tasks
+            WHERE week_number = %s AND year = %s AND completed_by IS NOT NULL
+            GROUP BY completed_by
+        """, (current_week, current_year))
+        for r in cur.fetchall():
+            if r["completed_by"] in bonus_week:
+                bonus_week[r["completed_by"]] = r["cnt"]
 
-    cur.execute("""
-        SELECT completed_by, COUNT(*) as cnt
-        FROM bonus_tasks
-        WHERE completed_at >= %s AND completed_by IS NOT NULL
-        GROUP BY completed_by
-    """, (month_start,))
-    for r in cur.fetchall():
-        if r["completed_by"] in bonus_month:
-            bonus_month[r["completed_by"]] = r["cnt"]
+        cur.execute("""
+            SELECT completed_by, COUNT(*) as cnt
+            FROM bonus_tasks
+            WHERE completed_at >= %s AND completed_by IS NOT NULL
+            GROUP BY completed_by
+        """, (month_start,))
+        for r in cur.fetchall():
+            if r["completed_by"] in bonus_month:
+                bonus_month[r["completed_by"]] = r["cnt"]
 
-    cur.execute("""
-        SELECT completed_by, COUNT(*) as cnt
-        FROM bonus_tasks
-        WHERE completed_by IS NOT NULL
-        GROUP BY completed_by
-    """)
-    for r in cur.fetchall():
-        if r["completed_by"] in bonus_alltime:
-            bonus_alltime[r["completed_by"]] = r["cnt"]
+        cur.execute("""
+            SELECT completed_by, COUNT(*) as cnt
+            FROM bonus_tasks
+            WHERE completed_by IS NOT NULL
+            GROUP BY completed_by
+        """)
+        for r in cur.fetchall():
+            if r["completed_by"] in bonus_alltime:
+                bonus_alltime[r["completed_by"]] = r["cnt"]
+    except Exception:
+        # Bonus tasks tabel bestaat mogelijk nog niet
+        pass
 
     # Voeg bonustaken toe aan totalen
     for name in member_names:
