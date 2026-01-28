@@ -4478,11 +4478,13 @@ async def tasks_pwa():
 
                 if (t.completed_by) {
                     // Voltooide taak - toon met vinkje en unclaim optie
+                    const completedDate = new Date(t.completed_at);
+                    const completedDay = dayNames[completedDate.getDay()];
                     html += '<div class="bonus-task-item completed" data-bonus-id="' + t.id + '">';
                     html += '<div class="task-check" onclick="unclaimBonusTask(' + t.id + ', event)" title="Ongedaan maken">✓</div>';
                     html += '<div class="bonus-task-info">';
                     html += '<div class="bonus-task-name">' + t.name + '</div>';
-                    html += '<div class="bonus-task-completed">' + t.completed_by + ' (' + dayName + ')</div>';
+                    html += '<div class="bonus-task-completed">' + t.completed_by + ' (' + completedDay + ')</div>';
                     html += '</div>';
                     html += '</div>';
                 } else {
