@@ -5249,31 +5249,23 @@ def svg_to_png_data_uri(svg: str, size: int) -> bytes:
 
 @app.get("/icon-192.png")
 async def icon_192():
-    """192x192 app icon."""
-    # Serve SVG with PNG content-type (browsers handle this)
-    # For true PNG, you'd need server-side rendering with Pillow/cairo
-    return Response(
-        content=ICON_SVG.replace('viewBox="0 0 512 512"', 'viewBox="0 0 512 512" width="192" height="192"').encode(),
-        media_type="image/svg+xml"
-    )
+    """192x192 app icon - familie foto."""
+    from .icons import get_icon_192
+    return Response(content=get_icon_192(), media_type="image/jpeg")
 
 
 @app.get("/icon-512.png")
 async def icon_512():
-    """512x512 app icon."""
-    return Response(
-        content=ICON_SVG.replace('viewBox="0 0 512 512"', 'viewBox="0 0 512 512" width="512" height="512"').encode(),
-        media_type="image/svg+xml"
-    )
+    """512x512 app icon - familie foto."""
+    from .icons import get_icon_512
+    return Response(content=get_icon_512(), media_type="image/jpeg")
 
 
 @app.get("/apple-touch-icon.png")
 async def apple_touch_icon():
-    """Apple touch icon (180x180)."""
-    return Response(
-        content=ICON_SVG.replace('viewBox="0 0 512 512"', 'viewBox="0 0 512 512" width="180" height="180"').encode(),
-        media_type="image/svg+xml"
-    )
+    """Apple touch icon (180x180) - familie foto."""
+    from .icons import get_icon_180
+    return Response(content=get_icon_180(), media_type="image/jpeg")
 
 
 @app.get("/sw.js")
