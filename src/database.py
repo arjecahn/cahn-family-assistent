@@ -1994,6 +1994,38 @@ def complete_bonus_task(task_id: str, member_name: str) -> BonusTask:
     )
 
 
+def unclaim_bonus_task(task_id: str) -> BonusTask:
+    """Maak een voltooide bonustaak ongedaan."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE bonus_tasks
+        SET completed_by = NULL, completed_at = NULL
+        WHERE id = %s AND completed_by IS NOT NULL
+        RETURNING id, name, preferred_date, week_number, year, created_at, completed_by, completed_at
+    """, (task_id,))
+
+    row = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    if not row:
+        return None
+
+    return BonusTask(
+        id=str(row['id']),
+        name=row['name'],
+        preferred_date=row['preferred_date'],
+        week_number=row['week_number'],
+        year=row['year'],
+        created_at=row['created_at'],
+        completed_by=row['completed_by'],
+        completed_at=row['completed_at']
+    )
+
+
 def delete_bonus_task(task_id: str) -> bool:
     """Verwijder een bonustaak."""
     conn = get_db()

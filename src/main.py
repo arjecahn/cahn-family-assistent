@@ -1120,6 +1120,24 @@ async def complete_bonus_task_endpoint(task_id: str, request: CompleteBonusTaskR
     }
 
 
+@app.post("/api/bonus-tasks/{task_id}/unclaim")
+async def unclaim_bonus_task_endpoint(task_id: str):
+    """Maak een voltooide bonustaak ongedaan."""
+    from .database import unclaim_bonus_task
+
+    task = unclaim_bonus_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Bonustaak niet gevonden of niet voltooid")
+
+    return {
+        "success": True,
+        "task": {
+            "id": task.id,
+            "name": task.name
+        }
+    }
+
+
 @app.delete("/api/bonus-tasks/{task_id}")
 async def delete_bonus_task_endpoint(task_id: str):
     """Verwijder een bonustaak."""
@@ -1330,7 +1348,56 @@ async def rich_statistics():
         if r["task_name"] in task_stats and r["member_name"] in member_names:
             task_stats[r["task_name"]]["all_time"][r["member_name"]] = r["cnt"]
 
+    # Bonus task stats - tel ze bij de normale taken
+    bonus_week = {name: 0 for name in member_names}
+    bonus_month = {name: 0 for name in member_names}
+    bonus_alltime = {name: 0 for name in member_names}
+
+    cur.execute("""
+        SELECT completed_by, COUNT(*) as cnt
+        FROM bonus_tasks
+        WHERE week_number = %s AND year = %s AND completed_by IS NOT NULL
+        GROUP BY completed_by
+    """, (current_week, current_year))
+    for r in cur.fetchall():
+        if r["completed_by"] in bonus_week:
+            bonus_week[r["completed_by"]] = r["cnt"]
+
+    cur.execute("""
+        SELECT completed_by, COUNT(*) as cnt
+        FROM bonus_tasks
+        WHERE completed_at >= %s AND completed_by IS NOT NULL
+        GROUP BY completed_by
+    """, (month_start,))
+    for r in cur.fetchall():
+        if r["completed_by"] in bonus_month:
+            bonus_month[r["completed_by"]] = r["cnt"]
+
+    cur.execute("""
+        SELECT completed_by, COUNT(*) as cnt
+        FROM bonus_tasks
+        WHERE completed_by IS NOT NULL
+        GROUP BY completed_by
+    """)
+    for r in cur.fetchall():
+        if r["completed_by"] in bonus_alltime:
+            bonus_alltime[r["completed_by"]] = r["cnt"]
+
+    # Voeg bonustaken toe aan totalen
+    for name in member_names:
+        stats["members"][name]["this_week"] += bonus_week[name]
+        stats["members"][name]["this_month"] += bonus_month[name]
+        stats["members"][name]["all_time"] += bonus_alltime[name]
+
+    # Voeg Bonustaken toe aan task_breakdown
+    task_stats["Bonustaken"] = {
+        "week": bonus_week,
+        "month": bonus_month,
+        "all_time": bonus_alltime
+    }
+
     stats["task_breakdown"] = task_stats
+    stats["bonus_tasks"] = bonus_week  # Voor achievements
 
     # Totalen en leaderboard
     leaderboard_week = sorted(
@@ -1351,20 +1418,6 @@ async def rich_statistics():
         "month": leaderboard_month,
         "all_time": leaderboard_alltime
     }
-
-    # Bonus task stats
-    bonus_stats = {name: 0 for name in member_names}
-    cur.execute("""
-        SELECT completed_by, COUNT(*) as cnt
-        FROM bonus_tasks
-        WHERE week_number = %s AND year = %s AND completed_by IS NOT NULL
-        GROUP BY completed_by
-    """, (current_week, current_year))
-    for r in cur.fetchall():
-        if r["completed_by"] in bonus_stats:
-            bonus_stats[r["completed_by"]] = r["cnt"]
-
-    stats["bonus_tasks"] = bonus_stats
 
     # Fun achievements
     achievements = []
@@ -2285,10 +2338,33 @@ async def tasks_pwa():
             background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
             border-radius: 10px;
             margin-bottom: 8px;
+            transition: all 0.3s ease;
         }
         .bonus-task-item.completed {
             background: #f1f5f9;
-            opacity: 0.7;
+        }
+        .bonus-task-item.celebrating {
+            animation: celebrateBounce 0.5s ease;
+        }
+        @keyframes celebrateBounce {
+            0%, 100% { transform: scale(1); }
+            30% { transform: scale(1.05); }
+            60% { transform: scale(0.98); }
+        }
+        .bonus-task-item .task-check {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: #22c55e;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: bold;
+            margin-right: 12px;
+            cursor: pointer;
+            flex-shrink: 0;
         }
         .bonus-task-info {
             flex: 1;
@@ -4401,14 +4477,17 @@ async def tasks_pwa():
                 const dayName = dayNames[prefDate.getDay()];
 
                 if (t.completed_by) {
-                    html += '<div class="bonus-task-item completed">';
+                    // Voltooide taak - toon met vinkje en unclaim optie
+                    html += '<div class="bonus-task-item completed" data-bonus-id="' + t.id + '">';
+                    html += '<div class="task-check" onclick="unclaimBonusTask(' + t.id + ', event)" title="Ongedaan maken">✓</div>';
                     html += '<div class="bonus-task-info">';
                     html += '<div class="bonus-task-name">' + t.name + '</div>';
-                    html += '<div class="bonus-task-completed">✓ ' + t.completed_by + '</div>';
+                    html += '<div class="bonus-task-completed">' + t.completed_by + ' (' + dayName + ')</div>';
                     html += '</div>';
                     html += '</div>';
                 } else {
-                    html += '<div class="bonus-task-item">';
+                    // Open taak
+                    html += '<div class="bonus-task-item" data-bonus-id="' + t.id + '">';
                     html += '<div class="bonus-task-info">';
                     html += '<div class="bonus-task-name">' + t.name + '</div>';
                     html += '<div class="bonus-task-date">📅 ' + dayName + '</div>';
@@ -4489,6 +4568,9 @@ async def tasks_pwa():
                 return;
             }
 
+            // Vind het task element voor animatie
+            const taskEl = event ? event.target.closest('.bonus-task-item') : document.querySelector('[data-bonus-id="' + taskId + '"]');
+
             try {
                 const res = await fetch(API + '/api/bonus-tasks/' + taskId + '/complete', {
                     method: 'POST',
@@ -4498,16 +4580,20 @@ async def tasks_pwa():
 
                 if (res.ok) {
                     // Celebration!
-                    if (event && event.target) {
-                        const btn = event.target;
-                        const rect = btn.getBoundingClientRect();
-                        createConfetti(rect.left + rect.width/2, rect.top);
+                    if (taskEl) {
+                        taskEl.classList.add('celebrating');
+                        const rect = taskEl.getBoundingClientRect();
+                        createConfetti(rect.left + rect.width/2, rect.top + rect.height/2);
+                        createSparkles(rect.left + rect.width/2, rect.top + rect.height/2);
                     }
                     if (navigator.vibrate) navigator.vibrate([50, 30, 100]);
 
-                    invalidateAllCache();
-                    loadOpenBonusTasks();
-                    loadBonusTasks(); // Update Week view als die open is
+                    // Wacht even voor de animatie, dan refresh
+                    setTimeout(() => {
+                        invalidateAllCache();
+                        loadOpenBonusTasks();
+                        loadBonusTasks();
+                    }, 400);
                 } else {
                     alert('Kon niet claimen');
                 }
@@ -4516,18 +4602,18 @@ async def tasks_pwa():
             }
         }
 
-        // Laad open bonustaken voor Today view
+        // Laad bonustaken voor Today view (open + voltooid)
         async function loadOpenBonusTasks() {
             try {
-                const res = await fetch(API + '/api/bonus-tasks/open');
+                const res = await fetch(API + '/api/bonus-tasks');
                 const data = await res.json();
-                renderOpenBonusTasks(data.tasks);
+                renderBonusTasksToday(data.tasks);
             } catch (e) {
                 // Stil falen
             }
         }
 
-        function renderOpenBonusTasks(tasks) {
+        function renderBonusTasksToday(tasks) {
             const container = document.getElementById('bonusTasksToday');
             const list = document.getElementById('bonusTasksTodayList');
 
@@ -4544,16 +4630,46 @@ async def tasks_pwa():
                 const prefDate = new Date(t.preferred_date);
                 const dayName = dayNames[prefDate.getDay()];
 
-                html += '<div class="bonus-task-item">';
-                html += '<div class="bonus-task-info">';
-                html += '<div class="bonus-task-name">' + t.name + '</div>';
-                html += '<div class="bonus-task-date">📅 Liefst ' + dayName + '</div>';
-                html += '</div>';
-                html += '<button class="bonus-claim-btn" onclick="claimBonusTask(' + t.id + ', event)">Ik doe!</button>';
-                html += '</div>';
+                if (t.completed_by) {
+                    // Voltooide taak - toon met vinkje en unclaim optie
+                    html += '<div class="bonus-task-item completed" data-bonus-id="' + t.id + '">';
+                    html += '<div class="task-check" onclick="unclaimBonusTask(' + t.id + ', event)">✓</div>';
+                    html += '<div class="bonus-task-info">';
+                    html += '<div class="bonus-task-name">' + t.name + '</div>';
+                    html += '<div class="bonus-task-completed">✓ ' + t.completed_by + '</div>';
+                    html += '</div>';
+                    html += '</div>';
+                } else {
+                    // Open taak - toon met claim knop
+                    html += '<div class="bonus-task-item" data-bonus-id="' + t.id + '">';
+                    html += '<div class="bonus-task-info">';
+                    html += '<div class="bonus-task-name">' + t.name + '</div>';
+                    html += '<div class="bonus-task-date">📅 Liefst ' + dayName + '</div>';
+                    html += '</div>';
+                    html += '<button class="bonus-claim-btn" onclick="claimBonusTask(' + t.id + ', event)">Ik doe!</button>';
+                    html += '</div>';
+                }
             });
 
             list.innerHTML = html;
+        }
+
+        async function unclaimBonusTask(taskId, event) {
+            try {
+                const res = await fetch(API + '/api/bonus-tasks/' + taskId + '/unclaim', {
+                    method: 'POST'
+                });
+
+                if (res.ok) {
+                    invalidateAllCache();
+                    loadOpenBonusTasks();
+                    loadBonusTasks();
+                } else {
+                    alert('Kon niet ongedaan maken');
+                }
+            } catch (e) {
+                alert('Fout bij verbinding');
+            }
         }
 
         // === STAND ===
@@ -4798,28 +4914,6 @@ async def tasks_pwa():
                 html += '</div>';
             });
             html += '</div>';
-
-            // Bonustaken stats
-            if (data.bonus_tasks) {
-                const bonusTotal = Object.values(data.bonus_tasks).reduce((a,b) => a+b, 0);
-                if (bonusTotal > 0) {
-                    html += '<div class="stats-section" style="background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);">';
-                    html += '<h3>⭐ Bonustaken deze week</h3>';
-                    const maxBonus = Math.max(...Object.values(data.bonus_tasks), 1);
-                    Object.entries(data.bonus_tasks).forEach(([name, count]) => {
-                        const pct = Math.round((count / maxBonus) * 100);
-                        const color = memberColors[name] || '#4f46e5';
-                        html += '<div style="margin-bottom:8px;">';
-                        html += '<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px;">';
-                        html += '<span>' + name + '</span><span style="font-weight:600;">' + count + '</span>';
-                        html += '</div>';
-                        html += '<div style="height:8px;background:#fff;border-radius:4px;overflow:hidden;">';
-                        html += '<div style="width:' + pct + '%;height:100%;background:' + color + ';border-radius:4px;transition:width 0.5s;"></div>';
-                        html += '</div></div>';
-                    });
-                    html += '</div>';
-                }
-            }
 
             // Personal stats per member
             members.forEach(([name, info]) => {
