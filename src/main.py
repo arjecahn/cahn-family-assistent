@@ -2572,6 +2572,37 @@ async def tasks_pwa():
         </button>
     </nav>
 
+    <!-- What's New Modal -->
+    <div class="modal-overlay" id="whatsNewModal" onclick="closeWhatsNew(event)">
+        <div class="modal" onclick="event.stopPropagation()" style="text-align:center;">
+            <button class="close-btn" onclick="closeWhatsNew()">&times;</button>
+            <div style="font-size:48px;margin-bottom:12px;">🔔</div>
+            <h2 style="color:#4f46e5;margin-bottom:12px;">Nieuw: Push Notificaties!</h2>
+            <p style="color:#1e293b;font-size:15px;line-height:1.5;margin-bottom:16px;">
+                Je kunt nu <strong>herinneringen</strong> krijgen op je telefoon:
+            </p>
+            <div style="background:#f0fdf4;border-radius:12px;padding:14px;margin-bottom:16px;text-align:left;">
+                <div style="margin-bottom:8px;">
+                    <span style="font-size:18px;">🌅</span>
+                    <strong>07:00</strong> - Welke taken je vandaag hebt
+                </div>
+                <div>
+                    <span style="font-size:18px;">🌆</span>
+                    <strong>18:00</strong> - Reminder als er nog taken open staan
+                </div>
+            </div>
+            <p style="color:#64748b;font-size:14px;margin-bottom:20px;">
+                Zo vergeet je nooit meer je taken!
+            </p>
+            <button class="submit-btn" onclick="goToNotificationSettings()" style="background:linear-gradient(135deg, #22c55e 0%, #16a34a 100%);margin-bottom:10px;">
+                🔔 Notificaties aanzetten
+            </button>
+            <button onclick="closeWhatsNew()" style="background:none;border:none;color:#64748b;font-size:14px;cursor:pointer;padding:8px;">
+                Later misschien
+            </button>
+        </div>
+    </div>
+
     <!-- Waarom Modal -->
     <div class="modal-overlay" id="whyModal" onclick="closeModal(event)">
         <div class="modal" onclick="event.stopPropagation()">
@@ -2608,6 +2639,31 @@ async def tasks_pwa():
         const otterEmoji = '🦦';
         const bearEmojis = ['🐻', '🍯', '🐻', '🍯', '🐻‍❄️', '🧸'];
         const dayNamesNL = ['zondag', 'maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag'];
+
+        // === What's New Modal ===
+        const WHATS_NEW_VERSION = 'push-notifications-v1';
+
+        function checkWhatsNew() {
+            const seen = localStorage.getItem('whatsNewSeen');
+            if (seen !== WHATS_NEW_VERSION) {
+                // Wacht even tot de app geladen is
+                setTimeout(() => {
+                    document.getElementById('whatsNewModal').classList.add('show');
+                }, 1000);
+            }
+        }
+
+        function closeWhatsNew(event) {
+            if (event && event.target !== event.currentTarget) return;
+            document.getElementById('whatsNewModal').classList.remove('show');
+            localStorage.setItem('whatsNewSeen', WHATS_NEW_VERSION);
+        }
+
+        function goToNotificationSettings() {
+            closeWhatsNew();
+            // Ga naar Regels tab
+            showView('viewSettings', document.querySelector('.nav-item:last-child'));
+        }
 
         // Positie aan de rand (niet in het midden waar UI is)
         function edgePosition() {
@@ -4683,6 +4739,11 @@ async def tasks_pwa():
                     .catch(err => console.log('SW registration failed:', err));
             });
         }
+
+        // Check for What's New modal on load
+        window.addEventListener('load', () => {
+            checkWhatsNew();
+        });
     </script>
 </body>
 </html>"""
