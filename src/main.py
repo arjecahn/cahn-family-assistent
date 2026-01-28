@@ -2676,9 +2676,9 @@ async def tasks_pwa():
             <button class="add-task-btn" onclick="showAddTaskModal()">+ Taak toevoegen</button>
             <button class="refresh" onclick="loadTasks()">Vernieuwen</button>
 
-            <!-- Bonustaken beschikbaar -->
+            <!-- Mama's bonustaken -->
             <div id="bonusTasksToday" class="card" style="margin-top:16px;display:none;">
-                <h3 style="color:#1e293b;font-size:16px;margin-bottom:12px;">⭐ Bonustaken beschikbaar</h3>
+                <h3 style="color:#1e293b;font-size:16px;margin-bottom:12px;">⭐ Mama's bonustaken</h3>
                 <div id="bonusTasksTodayList"></div>
             </div>
         </div>
@@ -2691,10 +2691,10 @@ async def tasks_pwa():
                 </div>
             </div>
 
-            <!-- Bonustaken sectie -->
+            <!-- Mama's bonustaken sectie -->
             <div class="card" style="margin-top:16px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                    <h2 style="color:#1e293b;font-size:18px;">⭐ Bonustaken</h2>
+                    <h2 style="color:#1e293b;font-size:18px;">⭐ Mama's bonustaken</h2>
                     <button onclick="showAddBonusTask()" style="background:#667eea;color:white;border:none;border-radius:50%;width:32px;height:32px;font-size:20px;cursor:pointer;">+</button>
                 </div>
                 <div id="bonusTasksList"></div>
