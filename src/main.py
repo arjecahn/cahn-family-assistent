@@ -4731,7 +4731,7 @@ async def tasks_pwa():
             }
 
             try {
-                resultEl.innerHTML = '<span style="color:#64748b;">Test versturen...</span>';
+                resultEl.innerHTML = '<span style="color:#64748b;">Test versturen... (ochtend + avond)</span>';
 
                 const res = await fetch('/api/push/test', {
                     method: 'POST',
@@ -4740,11 +4740,23 @@ async def tasks_pwa():
                 });
 
                 const data = await res.json();
-                if (data.success > 0) {
-                    resultEl.innerHTML = '<span style="color:#22c55e;">✅ Test verstuurd! Check je notificaties.</span>';
+
+                // Check resultaten van morning en evening
+                const morningSent = data.morning && data.morning.success > 0;
+                const eveningSent = data.evening && data.evening.success > 0;
+                const morningSkipped = data.morning && data.morning.skipped;
+                const eveningSkipped = data.evening && data.evening.skipped;
+
+                let msg = '';
+                if (morningSent || eveningSent) {
+                    msg = '<span style="color:#22c55e;">✅ Notificaties verstuurd! Check je telefoon.</span>';
+                } else if (morningSkipped && eveningSkipped) {
+                    // Geen taken vandaag
+                    msg = '<span style="color:#f59e0b;">📭 ' + (data.morning.reason || 'Geen taken vandaag') + '</span>';
                 } else {
-                    resultEl.innerHTML = '<span style="color:#ef4444;">Geen notificatie verstuurd: ' + (data.error || 'onbekende fout') + '</span>';
+                    msg = '<span style="color:#ef4444;">Kon niet versturen. Zijn notificaties ingeschakeld?</span>';
                 }
+                resultEl.innerHTML = msg;
             } catch (e) {
                 resultEl.innerHTML = '<span style="color:#ef4444;">Fout: ' + e.message + '</span>';
             }
