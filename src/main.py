@@ -205,14 +205,56 @@ class PushTestRequest(BaseModel):
 
 @app.post("/api/push/test")
 async def push_test(request: PushTestRequest):
-    """Stuur een test notificatie naar een gezinslid."""
-    result = send_push_notification(
-        member_name=request.member_name,
-        title="Test notificatie",
-        body=f"Hoi {request.member_name}! Push notificaties werken.",
-        data={"type": "test"}
-    )
-    return result
+    """Stuur test notificaties naar een gezinslid (ochtend + avond)."""
+    from .database import today_local, get_completions_for_week
+    from .task_engine import engine
+
+    today = today_local()
+    week_number = today.isocalendar()[1]
+    day_of_week = today.weekday()
+    day_name = ["ma", "di", "wo", "do", "vr", "za", "zo"][day_of_week]
+
+    # Haal het rooster
+    schedule = engine.get_week_schedule()
+
+    # Verzamel taken voor vandaag
+    member_tasks = []
+    if day_name in schedule.get("schedule", {}):
+        day_schedule = schedule["schedule"][day_name]
+        for task_name, assigned_member in day_schedule.items():
+            if assigned_member == request.member_name:
+                member_tasks.append(task_name)
+
+    # Verzamel openstaande taken (niet afgevinkt vandaag)
+    completions = get_completions_for_week(week_number)
+    completed_today = set()
+    for c in completions:
+        if c.completed_at.date() == today:
+            completed_today.add((c.member_name, c.task_name))
+
+    open_tasks = []
+    for task in member_tasks:
+        if (request.member_name, task) not in completed_today:
+            open_tasks.append(task)
+
+    results = {"morning": None, "evening": None}
+
+    # Stuur ochtend notificatie
+    if member_tasks:
+        results["morning"] = send_morning_reminder(request.member_name, member_tasks)
+    else:
+        results["morning"] = {"skipped": True, "reason": "Geen taken vandaag"}
+
+    # Stuur avond notificatie (na 2 sec delay zodat ze apart aankomen)
+    import asyncio
+    await asyncio.sleep(2)
+
+    if open_tasks:
+        results["evening"] = send_evening_reminder(request.member_name, open_tasks)
+    else:
+        results["evening"] = {"skipped": True, "reason": "Alle taken al gedaan!"}
+
+    return results
 
 
 @app.get("/api/push/status/{member_name}")
