@@ -4749,7 +4749,7 @@ async def tasks_pwa():
             }
 
             try {
-                resultEl.innerHTML = '<span style="color:#64748b;">Test versturen... (ochtend + avond)</span>';
+                resultEl.innerHTML = '<span style="color:#64748b;">Test versturen... (even geduld)</span>';
 
                 const res = await fetch('/api/push/test', {
                     method: 'POST',
@@ -4757,25 +4757,35 @@ async def tasks_pwa():
                     body: JSON.stringify({ member_name: currentMember })
                 });
 
+                console.log('Push test response status:', res.status);
+
+                if (!res.ok) {
+                    const errorText = await res.text();
+                    console.error('Push test error:', errorText);
+                    resultEl.innerHTML = '<span style="color:#ef4444;">Server error: ' + res.status + '</span>';
+                    return;
+                }
+
                 const data = await res.json();
+                console.log('Push test data:', data);
 
                 // Check resultaten van morning en evening
                 const morningSent = data.morning && data.morning.success > 0;
                 const eveningSent = data.evening && data.evening.success > 0;
-                const morningSkipped = data.morning && data.morning.skipped;
-                const eveningSkipped = data.evening && data.evening.skipped;
 
                 let msg = '';
                 if (morningSent || eveningSent) {
-                    msg = '<span style="color:#22c55e;">✅ Notificaties verstuurd! Check je telefoon.</span>';
-                } else if (morningSkipped && eveningSkipped) {
-                    // Geen taken vandaag
-                    msg = '<span style="color:#f59e0b;">📭 ' + (data.morning.reason || 'Geen taken vandaag') + '</span>';
+                    const count = (data.morning?.success || 0) + (data.evening?.success || 0);
+                    msg = '<span style="color:#22c55e;">✅ ' + count + ' notificatie(s) verstuurd!</span>';
+                } else if (data.morning?.error || data.evening?.error) {
+                    // VAPID keys niet geconfigureerd of andere server error
+                    msg = '<span style="color:#ef4444;">' + (data.morning?.error || data.evening?.error) + '</span>';
                 } else {
-                    msg = '<span style="color:#ef4444;">Kon niet versturen. Zijn notificaties ingeschakeld?</span>';
+                    msg = '<span style="color:#ef4444;">Geen subscription gevonden. Schakel notificaties opnieuw in.</span>';
                 }
                 resultEl.innerHTML = msg;
             } catch (e) {
+                console.error('Push test exception:', e);
                 resultEl.innerHTML = '<span style="color:#ef4444;">Fout: ' + e.message + '</span>';
             }
 
