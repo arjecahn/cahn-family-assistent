@@ -2993,11 +2993,19 @@ async def tasks_pwa():
             </div>
 
             <!-- Bonustaken -->
-            <div style="background:#fef3c7;border-radius:12px;padding:14px;margin-bottom:16px;text-align:left;">
+            <div style="background:#fef3c7;border-radius:12px;padding:14px;margin-bottom:12px;text-align:left;">
                 <div style="font-weight:600;color:#1e293b;margin-bottom:8px;">⭐ Mama's Bonustaken</div>
                 <div style="font-size:14px;color:#64748b;">
                     Extra taken die mama aanmaakt. Wie ze doet krijgt bonuspunten!
                     Check de Week-tab om ze te zien.
+                </div>
+            </div>
+
+            <!-- Snellere server -->
+            <div style="background:#e0f2fe;border-radius:12px;padding:14px;margin-bottom:16px;text-align:left;">
+                <div style="font-weight:600;color:#1e293b;margin-bottom:8px;">🚀 Snellere app</div>
+                <div style="font-size:14px;color:#64748b;">
+                    Server verhuisd naar Duitsland - de app is nu veel sneller!
                 </div>
             </div>
 
@@ -3048,7 +3056,7 @@ async def tasks_pwa():
         const dayNamesNL = ['zondag', 'maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag'];
 
         // === What's New Modal ===
-        const WHATS_NEW_VERSION = 'push-notifications-bonus-tasks-v2';
+        const WHATS_NEW_VERSION = 'push-notifications-bonus-tasks-v3';
 
         function checkWhatsNew() {
             const seen = localStorage.getItem('whatsNewSeen');
