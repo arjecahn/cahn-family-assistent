@@ -4633,7 +4633,8 @@ async def tasks_pwa():
                 return;
             }
 
-            const today = new Date().toDateString();
+            // Vergelijk met de dag die we bekijken (currentDate), niet per se vandaag
+            const viewingDate = currentDate.toDateString();
             const dayNames = ['zondag', 'maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag'];
             let html = '';
 
@@ -4642,9 +4643,9 @@ async def tasks_pwa():
                 const dayName = dayNames[prefDate.getDay()];
 
                 if (t.completed_by) {
-                    // Voltooide taak - alleen tonen als vandaag voltooid
+                    // Voltooide taak - alleen tonen op de dag dat het is voltooid
                     const completedDate = new Date(t.completed_at).toDateString();
-                    if (completedDate !== today) return; // Skip als niet vandaag voltooid
+                    if (completedDate !== viewingDate) return; // Skip als niet op deze dag voltooid
 
                     html += '<div class="bonus-task-item completed" data-bonus-id="' + t.id + '">';
                     html += '<div class="task-check" onclick="unclaimBonusTask(' + t.id + ', event)">✓</div>';
