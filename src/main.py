@@ -3268,19 +3268,123 @@ async def tasks_pwa():
             loadTasks();
         }
 
+        // === CACHE SYSTEM ===
+        const CACHE_PREFIX = 'tasks_cache_';
+        const CACHE_MAX_AGE = 5 * 60 * 1000; // 5 minuten
+
+        function getCacheKey(member, dateStr) {
+            return CACHE_PREFIX + member + '_' + dateStr;
+        }
+
+        function getCachedData(member, dateStr) {
+            try {
+                const key = getCacheKey(member, dateStr);
+                const cached = localStorage.getItem(key);
+                if (!cached) return null;
+                const {data, timestamp} = JSON.parse(cached);
+                // Cache is nog vers
+                if (Date.now() - timestamp < CACHE_MAX_AGE) {
+                    return data;
+                }
+                // Cache verlopen, verwijder
+                localStorage.removeItem(key);
+                return null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function setCachedData(member, dateStr, data) {
+            try {
+                const key = getCacheKey(member, dateStr);
+                localStorage.setItem(key, JSON.stringify({data, timestamp: Date.now()}));
+                // Ruim oude cache entries op (max 10 bewaren)
+                cleanOldCache();
+            } catch (e) {
+                // localStorage vol of niet beschikbaar
+            }
+        }
+
+        function cleanOldCache() {
+            const keys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith(CACHE_PREFIX)) {
+                    keys.push(key);
+                }
+            }
+            // Houd max 10 entries
+            if (keys.length > 10) {
+                keys.slice(0, keys.length - 10).forEach(k => localStorage.removeItem(k));
+            }
+        }
+
+        function invalidateCache(member, dateStr) {
+            // Verwijder cache voor specifieke dag
+            const key = getCacheKey(member, dateStr);
+            localStorage.removeItem(key);
+        }
+
+        function invalidateAllCache() {
+            // Verwijder alle task cache (na actie die meerdere dagen beïnvloedt)
+            for (let i = localStorage.length - 1; i >= 0; i--) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith(CACHE_PREFIX)) {
+                    localStorage.removeItem(key);
+                }
+            }
+        }
+
+        async function fetchTasks(member, dateStr) {
+            const res = await fetch(API + '/api/my-tasks/' + member + '?date=' + dateStr);
+            return await res.json();
+        }
+
+        function prefetchAdjacentDays() {
+            if (!currentMember) return;
+            // Prefetch gisteren en morgen in de achtergrond
+            [-1, 1].forEach(delta => {
+                const d = new Date(currentDate);
+                d.setDate(d.getDate() + delta);
+                const dateStr = formatDateISO(d);
+                // Alleen prefetchen als niet in cache
+                if (!getCachedData(currentMember, dateStr)) {
+                    fetchTasks(currentMember, dateStr).then(data => {
+                        setCachedData(currentMember, dateStr, data);
+                    }).catch(() => {});
+                }
+            });
+        }
+
         async function loadTasks() {
             if (!currentMember) return;
 
-            document.getElementById('tasks').innerHTML = '<div class="loading"><div class="spinner"></div>Laden...</div>';
+            const dateStr = formatDateISO(currentDate);
+            const cached = getCachedData(currentMember, dateStr);
 
+            // Toon gecachede data direct (geen spinner!)
+            if (cached) {
+                updateDateDisplay(cached);
+                renderTasks(cached);
+            } else {
+                // Alleen spinner als er geen cache is
+                document.getElementById('tasks').innerHTML = '<div class="loading"><div class="spinner"></div>Laden...</div>';
+            }
+
+            // Altijd verse data ophalen in achtergrond
             try {
-                const dateStr = formatDateISO(currentDate);
-                const res = await fetch(API + '/api/my-tasks/' + currentMember + '?date=' + dateStr);
-                const data = await res.json();
+                const data = await fetchTasks(currentMember, dateStr);
+                setCachedData(currentMember, dateStr, data);
+                // Update UI met verse data
                 updateDateDisplay(data);
                 renderTasks(data);
+                // Prefetch aangrenzende dagen
+                prefetchAdjacentDays();
             } catch (e) {
-                document.getElementById('tasks').innerHTML = '<div class="empty">Fout bij laden</div>';
+                // Alleen error tonen als er geen cache was
+                if (!cached) {
+                    document.getElementById('tasks').innerHTML = '<div class="empty">Fout bij laden</div>';
+                }
             }
         }
 
@@ -3687,6 +3791,8 @@ async def tasks_pwa():
                 if (res.ok) {
                     // Check of alle taken nu klaar zijn (voor mega celebration)
                     if (!isDone) checkAllTasksDone();
+                    // Invalideer cache (taak toggle beïnvloedt weekoverzicht)
+                    invalidateAllCache();
                     // Succes: herlaad voor correcte data
                     loadTasks();
                 } else {
@@ -3881,6 +3987,7 @@ async def tasks_pwa():
             try {
                 const res = await fetch(API + '/api/tasks/extra/' + extraId, { method: 'DELETE' });
                 if (res.ok) {
+                    invalidateAllCache();
                     loadTasks();
                 } else {
                     // Rollback bij fout
