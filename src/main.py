@@ -2981,29 +2981,31 @@ async def tasks_pwa():
     <div class="modal-overlay" id="whatsNewModal" onclick="closeWhatsNew(event)">
         <div class="modal" onclick="event.stopPropagation()" style="text-align:center;">
             <button class="close-btn" onclick="closeWhatsNew()">&times;</button>
-            <div style="font-size:48px;margin-bottom:12px;">🔔</div>
-            <h2 style="color:#4f46e5;margin-bottom:12px;">Nieuw: Push Notificaties!</h2>
-            <p style="color:#1e293b;font-size:15px;line-height:1.5;margin-bottom:16px;">
-                Je kunt nu <strong>herinneringen</strong> krijgen op je telefoon:
-            </p>
-            <div style="background:#f0fdf4;border-radius:12px;padding:14px;margin-bottom:16px;text-align:left;">
-                <div style="margin-bottom:8px;">
-                    <span style="font-size:18px;">🌅</span>
-                    <strong>07:00</strong> - Welke taken je vandaag hebt
-                </div>
-                <div>
-                    <span style="font-size:18px;">🌆</span>
-                    <strong>18:00</strong> - Reminder als er nog taken open staan
+            <div style="font-size:48px;margin-bottom:12px;">🎉</div>
+            <h2 style="color:#4f46e5;margin-bottom:16px;">Nieuw in de app!</h2>
+
+            <!-- Notificaties -->
+            <div style="background:#f0fdf4;border-radius:12px;padding:14px;margin-bottom:12px;text-align:left;">
+                <div style="font-weight:600;color:#1e293b;margin-bottom:8px;">🔔 Push Notificaties</div>
+                <div style="font-size:14px;color:#64748b;">
+                    Krijg herinneringen om 07:00 en 18:00 voor je taken.
                 </div>
             </div>
-            <p style="color:#64748b;font-size:14px;margin-bottom:20px;">
-                Zo vergeet je nooit meer je taken!
-            </p>
+
+            <!-- Bonustaken -->
+            <div style="background:#fef3c7;border-radius:12px;padding:14px;margin-bottom:16px;text-align:left;">
+                <div style="font-weight:600;color:#1e293b;margin-bottom:8px;">⭐ Mama's Bonustaken</div>
+                <div style="font-size:14px;color:#64748b;">
+                    Extra taken die mama aanmaakt. Wie ze doet krijgt bonuspunten!
+                    Check de Week-tab om ze te zien.
+                </div>
+            </div>
+
             <button class="submit-btn" onclick="goToNotificationSettings()" style="background:linear-gradient(135deg, #22c55e 0%, #16a34a 100%);margin-bottom:10px;">
                 🔔 Notificaties aanzetten
             </button>
             <button onclick="closeWhatsNew()" style="background:none;border:none;color:#64748b;font-size:14px;cursor:pointer;padding:8px;">
-                Later misschien
+                Sluiten
             </button>
         </div>
     </div>
