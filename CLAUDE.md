@@ -81,6 +81,7 @@ PostgreSQL via Supabase met automatische URL parsing voor Vercel compatibility.
 - `absences` - Afwezigheidsperiodes
 - `swaps` - Ruil verzoeken
 - `push_subscriptions` - Push notification subscriptions per device
+- `bonus_tasks` - Eenmalige bonustaken van mama
 
 ### API Endpoints (`src/main.py`)
 
@@ -105,6 +106,11 @@ PostgreSQL via Supabase met automatische URL parsing voor Vercel compatibility.
 | `/api/push/test` | POST | Stuur test notificatie |
 | `/api/push/morning-reminders` | POST | Stuur ochtend herinneringen (cron: 7:00) |
 | `/api/push/evening-reminders` | POST | Stuur avond herinneringen (cron: 18:00) |
+| `/api/bonus-tasks` | GET | Bonustaken voor week (query: week, year) |
+| `/api/bonus-tasks` | POST | Nieuwe bonustaak aanmaken |
+| `/api/bonus-tasks/{id}/complete` | POST | Claim bonustaak |
+| `/api/bonus-tasks/{id}/unclaim` | POST | Maak claim ongedaan |
+| `/api/bonus-tasks/{id}` | DELETE | Verwijder bonustaak |
 
 ## Environment Variables
 
@@ -314,5 +320,56 @@ Bij het genereren van het weekrooster (`_generate_new_schedule`):
 
 ### Swap Functionaliteit (WIP)
 Er is een `/api/swap/same-day` endpoint maar de UI is tijdelijk uitgeschakeld (commented out in main.py). Moet nog getest/verbeterd worden.
+
+### Bonus Tasks
+Mama kan eenmalige bonustaken aanmaken die elk kind kan claimen. Deze worden meegeteld in de reguliere statistieken.
+
+**Database:** `bonus_tasks` tabel
+**API endpoints:**
+- `GET /api/bonus-tasks?week=X&year=Y` - Lijst bonustaken voor week
+- `POST /api/bonus-tasks` - Nieuwe bonustaak aanmaken
+- `POST /api/bonus-tasks/{id}/complete` - Claim bonustaak
+- `POST /api/bonus-tasks/{id}/unclaim` - Maak claim ongedaan
+- `DELETE /api/bonus-tasks/{id}` - Verwijder bonustaak
+
+**UI locaties:**
+- Vandaag view: "Mama's bonustaken" sectie
+- Week view: "Mama's bonustaken" sectie met completion datum
+- Stand view: Bonustaken worden meegeteld in reguliere stats + radar chart
+
+**Visibility regel:** Voltooide bonustaken zijn alleen zichtbaar op de dag dat ze zijn afgevinkt.
+
+### What's New Modal
+De modal wordt getoond wanneer `WHATS_NEW_VERSION` verschilt van `localStorage.whatsNewSeen`.
+
+**Om de modal opnieuw te tonen aan alle gebruikers:** Bump de `WHATS_NEW_VERSION` constant (bijv. van `v1` naar `v2`).
+
+### JavaScript onclick Event Parameter
+Bij `onclick="functionName(event, ...)"` moet de functie `event` als parameter ontvangen:
+```javascript
+// FOUT - event is undefined
+function claimTask(taskId) {
+    event.stopPropagation(); // Crash!
+}
+
+// GOED
+function claimTask(event, taskId) {
+    event.stopPropagation(); // Werkt
+}
+```
+
+### Datum Vergelijking voor "Vandaag" Filtering
+Let op bij het filteren van items voor de "vandaag" view: gebruik de **bekeken datum** (`currentDate`), niet de **actuele datum** (`new Date()`).
+
+```javascript
+// FOUT - vergelijkt met echte vandaag
+const today = new Date().toDateString();
+
+// GOED - vergelijkt met de datum die de gebruiker bekijkt
+const viewingDate = currentDate.toDateString();
+```
+
+### Loading Indicators
+Alle async operaties (fetch calls) moeten een loading indicator tonen. Gebruik `showRefreshingIndicator()` aan het begin van de functie - dit toont pulserende stipjes die automatisch verdwijnen als de data opnieuw wordt geladen.
 
 @.fp/FP_CLAUDE.md
