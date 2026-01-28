@@ -2107,26 +2107,29 @@ async def tasks_pwa():
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
-        /* Refreshing indicator - subtle dots */
+        /* Loading indicator - dots */
         .refreshing-indicator {
             text-align: center;
-            padding: 8px;
+            padding: 12px;
             color: #94a3b8;
-            font-size: 13px;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 4px;
+            gap: 6px;
             opacity: 0;
             animation: fadeIn 0.3s ease forwards;
+        }
+        /* Meer ruimte als standalone (enige child) */
+        .refreshing-indicator:only-child {
+            padding: 40px;
         }
         @keyframes fadeIn {
             to { opacity: 1; }
         }
         .refreshing-indicator .dot {
-            width: 6px;
-            height: 6px;
-            background: #94a3b8;
+            width: 8px;
+            height: 8px;
+            background: #667eea;
             border-radius: 50%;
             animation: pulse 1.2s ease-in-out infinite;
         }
@@ -3412,33 +3415,28 @@ async def tasks_pwa():
             const dateStr = formatDateISO(currentDate);
             const cached = getCachedData(currentMember, dateStr);
 
-            // Toon gecachede data direct (geen spinner!)
+            // Toon gecachede data direct, of lege container
             if (cached) {
                 updateDateDisplay(cached);
                 renderTasks(cached);
-                // Toon subtiele refresh indicator
-                showRefreshingIndicator('tasks');
             } else {
-                // Alleen spinner als er geen cache is
-                document.getElementById('tasks').innerHTML = '<div class="loading"><div class="spinner"></div>Laden...</div>';
+                document.getElementById('tasks').innerHTML = '';
             }
+            // Altijd laad-indicator tonen
+            showRefreshingIndicator('tasks');
 
-            // Altijd verse data ophalen in achtergrond
+            // Verse data ophalen
             try {
                 const data = await fetchTasks(currentMember, dateStr);
                 setCachedData(currentMember, dateStr, data);
-                // Update UI met verse data
                 updateDateDisplay(data);
                 renderTasks(data);
-                // Prefetch aangrenzende dagen
                 prefetchAdjacentDays();
             } catch (e) {
-                // Alleen error tonen als er geen cache was
                 if (!cached) {
                     document.getElementById('tasks').innerHTML = '<div class="empty">Fout bij laden</div>';
                 }
             }
-            // Indicator verbergen (renderTasks overschrijft de content, dus al weg)
         }
 
         function renderTasks(data) {
@@ -4101,13 +4099,13 @@ async def tasks_pwa():
             const container = document.getElementById('weekSchedule');
             const cached = getWeekCache();
 
-            // Direct gecachede data tonen
+            // Toon gecachede data direct, of lege container
             if (cached) {
                 renderWeekSchedule(cached);
-                showRefreshingIndicator('weekSchedule');
             } else {
-                container.innerHTML = '<div class="loading"><div class="spinner"></div>Laden...</div>';
+                container.innerHTML = '';
             }
+            showRefreshingIndicator('weekSchedule');
 
             // Verse data ophalen
             try {
@@ -4299,10 +4297,10 @@ async def tasks_pwa():
             if (cached) {
                 statsData = cached;
                 renderStand();
-                showRefreshingIndicator('standContent');
             } else {
-                container.innerHTML = '<div class="loading"><div class="spinner"></div>Laden...</div>';
+                container.innerHTML = '';
             }
+            showRefreshingIndicator('standContent');
 
             try {
                 const res = await fetch(API + '/api/stats');
