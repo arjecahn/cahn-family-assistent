@@ -4550,12 +4550,15 @@ async def tasks_pwa():
         async function deleteBonusTask(taskId) {
             if (!confirm('Bonustaak verwijderen?')) return;
 
+            // Toon loading indicator
+            showRefreshingIndicator('bonusTasksList');
+
             try {
                 const res = await fetch(API + '/api/bonus-tasks/' + taskId, {method: 'DELETE'});
                 if (res.ok) {
                     invalidateAllCache();
                     loadBonusTasks();
-                    loadOpenBonusTasks(); // Update ook Today view
+                    loadOpenBonusTasks();
                 } else {
                     alert('Kon niet verwijderen');
                 }
@@ -4590,8 +4593,10 @@ async def tasks_pwa():
                     }
                     if (navigator.vibrate) navigator.vibrate([50, 30, 100]);
 
-                    // Wacht even voor de animatie, dan refresh
+                    // Wacht even voor de animatie, dan refresh met loading indicator
                     setTimeout(() => {
+                        showRefreshingIndicator('bonusTasksList');
+                        showRefreshingIndicator('bonusTasksTodayList');
                         invalidateAllCache();
                         loadOpenBonusTasks();
                         loadBonusTasks();
@@ -4657,6 +4662,10 @@ async def tasks_pwa():
         }
 
         async function unclaimBonusTask(taskId, event) {
+            // Toon loading indicator
+            showRefreshingIndicator('bonusTasksList');
+            showRefreshingIndicator('bonusTasksTodayList');
+
             try {
                 const res = await fetch(API + '/api/bonus-tasks/' + taskId + '/unclaim', {
                     method: 'POST'
