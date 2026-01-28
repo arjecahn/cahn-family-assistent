@@ -202,6 +202,20 @@ def init_db():
         )
     """)
 
+    # Bonus tasks - optionele eenmalige taken van mama/papa
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bonus_tasks (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(200) NOT NULL,
+            preferred_date DATE NOT NULL,
+            week_number INTEGER NOT NULL,
+            year INTEGER NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            completed_by VARCHAR(50),
+            completed_at TIMESTAMPTZ
+        )
+    """)
+
     conn.commit()
     cur.close()
     conn.close()
@@ -1837,6 +1851,205 @@ def migrate_add_push_subscriptions_table():
         """)
         conn.commit()
         print("push_subscriptions tabel aangemaakt!")
+
+    except Exception as e:
+        conn.rollback()
+        print(f"Migratie fout: {e}")
+        raise e
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+# === BONUS TASKS ===
+
+from .models import BonusTask
+
+
+def create_bonus_task(name: str, preferred_date: date) -> BonusTask:
+    """Maak een nieuwe bonustaak aan."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    week_number = preferred_date.isocalendar()[1]
+    year = preferred_date.year
+
+    cur.execute("""
+        INSERT INTO bonus_tasks (name, preferred_date, week_number, year)
+        VALUES (%s, %s, %s, %s)
+        RETURNING id, name, preferred_date, week_number, year, created_at, completed_by, completed_at
+    """, (name, preferred_date, week_number, year))
+
+    row = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return BonusTask(
+        id=str(row['id']),
+        name=row['name'],
+        preferred_date=row['preferred_date'],
+        week_number=row['week_number'],
+        year=row['year'],
+        created_at=row['created_at'],
+        completed_by=row['completed_by'],
+        completed_at=row['completed_at']
+    )
+
+
+def get_bonus_tasks_for_week(week_number: int = None, year: int = None) -> list[BonusTask]:
+    """Haal alle bonustaken op voor een specifieke week."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    if week_number is None:
+        week_number = today_local().isocalendar()[1]
+    if year is None:
+        year = today_local().year
+
+    cur.execute("""
+        SELECT id, name, preferred_date, week_number, year, created_at, completed_by, completed_at
+        FROM bonus_tasks
+        WHERE week_number = %s AND year = %s
+        ORDER BY preferred_date, created_at
+    """, (week_number, year))
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return [BonusTask(
+        id=str(row['id']),
+        name=row['name'],
+        preferred_date=row['preferred_date'],
+        week_number=row['week_number'],
+        year=row['year'],
+        created_at=row['created_at'],
+        completed_by=row['completed_by'],
+        completed_at=row['completed_at']
+    ) for row in rows]
+
+
+def get_open_bonus_tasks() -> list[BonusTask]:
+    """Haal alle nog niet voltooide bonustaken op voor deze week."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    week_number = today_local().isocalendar()[1]
+    year = today_local().year
+
+    cur.execute("""
+        SELECT id, name, preferred_date, week_number, year, created_at, completed_by, completed_at
+        FROM bonus_tasks
+        WHERE week_number = %s AND year = %s AND completed_by IS NULL
+        ORDER BY preferred_date, created_at
+    """, (week_number, year))
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return [BonusTask(
+        id=str(row['id']),
+        name=row['name'],
+        preferred_date=row['preferred_date'],
+        week_number=row['week_number'],
+        year=row['year'],
+        created_at=row['created_at'],
+        completed_by=row['completed_by'],
+        completed_at=row['completed_at']
+    ) for row in rows]
+
+
+def complete_bonus_task(task_id: str, member_name: str) -> BonusTask:
+    """Markeer een bonustaak als voltooid door een gezinslid."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE bonus_tasks
+        SET completed_by = %s, completed_at = %s
+        WHERE id = %s AND completed_by IS NULL
+        RETURNING id, name, preferred_date, week_number, year, created_at, completed_by, completed_at
+    """, (member_name, now_local(), task_id))
+
+    row = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    if not row:
+        return None
+
+    return BonusTask(
+        id=str(row['id']),
+        name=row['name'],
+        preferred_date=row['preferred_date'],
+        week_number=row['week_number'],
+        year=row['year'],
+        created_at=row['created_at'],
+        completed_by=row['completed_by'],
+        completed_at=row['completed_at']
+    )
+
+
+def delete_bonus_task(task_id: str) -> bool:
+    """Verwijder een bonustaak."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM bonus_tasks WHERE id = %s", (task_id,))
+    deleted = cur.rowcount > 0
+    conn.commit()
+    cur.close()
+    conn.close()
+    return deleted
+
+
+def get_bonus_task_stats(week_number: int = None, year: int = None) -> dict:
+    """Haal statistieken op voor bonustaken per persoon."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    if week_number is None:
+        week_number = today_local().isocalendar()[1]
+    if year is None:
+        year = today_local().year
+
+    cur.execute("""
+        SELECT completed_by, COUNT(*) as count
+        FROM bonus_tasks
+        WHERE week_number = %s AND year = %s AND completed_by IS NOT NULL
+        GROUP BY completed_by
+    """, (week_number, year))
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return {row['completed_by']: row['count'] for row in rows}
+
+
+def migrate_add_bonus_tasks_table():
+    """Migratie: voeg bonus_tasks tabel toe aan bestaande database."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS bonus_tasks (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(200) NOT NULL,
+                preferred_date DATE NOT NULL,
+                week_number INTEGER NOT NULL,
+                year INTEGER NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                completed_by VARCHAR(50),
+                completed_at TIMESTAMPTZ
+            )
+        """)
+        conn.commit()
+        print("bonus_tasks tabel aangemaakt!")
 
     except Exception as e:
         conn.rollback()

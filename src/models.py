@@ -121,3 +121,15 @@ class PushSubscription(BaseModel):
     p256dh: str  # Public key for encryption
     auth: str    # Auth secret
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class BonusTask(BaseModel):
+    """Bonustaak - optionele eenmalige taak aangemaakt door mama/papa."""
+    id: str
+    name: str  # Beschrijving van de taak, bijv. "Kattenvoer kopen"
+    preferred_date: date  # Gewenste datum
+    week_number: int
+    year: int
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    completed_by: Optional[str] = None  # Naam van wie het gedaan heeft
+    completed_at: Optional[datetime] = None

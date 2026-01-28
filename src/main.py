@@ -1026,6 +1026,120 @@ async def remove_extra_task(extra_id: str):
     return {"success": True, "message": "Extra taak verwijderd"}
 
 
+# === BONUS TASKS (Mama's Bonustaken) ===
+
+class BonusTaskRequest(BaseModel):
+    name: str
+    preferred_date: str  # ISO date string
+
+
+@app.get("/api/bonus-tasks")
+async def get_bonus_tasks():
+    """Haal alle bonustaken op voor deze week."""
+    from .database import get_bonus_tasks_for_week, get_bonus_task_stats
+
+    tasks = get_bonus_tasks_for_week()
+    stats = get_bonus_task_stats()
+
+    return {
+        "tasks": [
+            {
+                "id": t.id,
+                "name": t.name,
+                "preferred_date": t.preferred_date.isoformat(),
+                "completed_by": t.completed_by,
+                "completed_at": t.completed_at.isoformat() if t.completed_at else None
+            }
+            for t in tasks
+        ],
+        "stats": stats
+    }
+
+
+@app.get("/api/bonus-tasks/open")
+async def get_open_bonus_tasks_endpoint():
+    """Haal alle open bonustaken op."""
+    from .database import get_open_bonus_tasks
+
+    tasks = get_open_bonus_tasks()
+    return {
+        "tasks": [
+            {
+                "id": t.id,
+                "name": t.name,
+                "preferred_date": t.preferred_date.isoformat()
+            }
+            for t in tasks
+        ]
+    }
+
+
+@app.post("/api/bonus-tasks")
+async def create_bonus_task_endpoint(request: BonusTaskRequest):
+    """Maak een nieuwe bonustaak aan."""
+    from .database import create_bonus_task
+    from datetime import date
+
+    try:
+        preferred_date = date.fromisoformat(request.preferred_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Ongeldige datum")
+
+    task = create_bonus_task(request.name, preferred_date)
+    return {
+        "success": True,
+        "task": {
+            "id": task.id,
+            "name": task.name,
+            "preferred_date": task.preferred_date.isoformat()
+        }
+    }
+
+
+class CompleteBonusTaskRequest(BaseModel):
+    member_name: str
+
+
+@app.post("/api/bonus-tasks/{task_id}/complete")
+async def complete_bonus_task_endpoint(task_id: str, request: CompleteBonusTaskRequest):
+    """Markeer een bonustaak als voltooid."""
+    from .database import complete_bonus_task
+
+    task = complete_bonus_task(task_id, request.member_name)
+    if not task:
+        raise HTTPException(status_code=404, detail="Bonustaak niet gevonden of al voltooid")
+
+    return {
+        "success": True,
+        "task": {
+            "id": task.id,
+            "name": task.name,
+            "completed_by": task.completed_by,
+            "completed_at": task.completed_at.isoformat() if task.completed_at else None
+        }
+    }
+
+
+@app.delete("/api/bonus-tasks/{task_id}")
+async def delete_bonus_task_endpoint(task_id: str):
+    """Verwijder een bonustaak."""
+    from .database import delete_bonus_task
+
+    deleted = delete_bonus_task(task_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Bonustaak niet gevonden")
+
+    return {"success": True, "message": "Bonustaak verwijderd"}
+
+
+@app.get("/api/migrate/bonus-tasks")
+async def migrate_bonus_tasks():
+    """Migratie endpoint voor bonus_tasks tabel."""
+    from .database import migrate_add_bonus_tasks_table
+    migrate_add_bonus_tasks_table()
+    return {"success": True, "message": "bonus_tasks tabel aangemaakt"}
+
+
 @app.get("/api/summary")
 async def weekly_summary():
     """Geef het weekoverzicht."""
@@ -1238,6 +1352,20 @@ async def rich_statistics():
         "all_time": leaderboard_alltime
     }
 
+    # Bonus task stats
+    bonus_stats = {name: 0 for name in member_names}
+    cur.execute("""
+        SELECT completed_by, COUNT(*) as cnt
+        FROM bonus_tasks
+        WHERE week_number = %s AND year = %s AND completed_by IS NOT NULL
+        GROUP BY completed_by
+    """, (current_week, current_year))
+    for r in cur.fetchall():
+        if r["completed_by"] in bonus_stats:
+            bonus_stats[r["completed_by"]] = r["cnt"]
+
+    stats["bonus_tasks"] = bonus_stats
+
     # Fun achievements
     achievements = []
     for name, data in stats["members"].items():
@@ -1249,6 +1377,9 @@ async def rich_statistics():
             achievements.append({"member": name, "badge": "⭐", "text": "50+ taken all-time!"})
         if data["all_time"] >= 100:
             achievements.append({"member": name, "badge": "🏆", "text": "100+ taken all-time!"})
+        # Bonus task achievement
+        if name in bonus_stats and bonus_stats[name] >= 2:
+            achievements.append({"member": name, "badge": "⭐", "text": f"{bonus_stats[name]} bonustaken deze week!"})
 
     stats["achievements"] = achievements
 
@@ -2145,6 +2276,55 @@ async def tasks_pwa():
             font-size: 14px;
             margin-top: 12px;
         }
+        /* Bonus tasks */
+        .bonus-task-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border-radius: 10px;
+            margin-bottom: 8px;
+        }
+        .bonus-task-item.completed {
+            background: #f1f5f9;
+            opacity: 0.7;
+        }
+        .bonus-task-info {
+            flex: 1;
+        }
+        .bonus-task-name {
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 2px;
+        }
+        .bonus-task-date {
+            font-size: 13px;
+            color: #64748b;
+        }
+        .bonus-task-completed {
+            font-size: 13px;
+            color: #22c55e;
+            font-weight: 500;
+        }
+        .bonus-claim-btn {
+            background: #22c55e;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .bonus-delete-btn {
+            background: none;
+            border: none;
+            color: #94a3b8;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 4px 8px;
+        }
         .refresh {
             display: block;
             margin: 20px auto;
@@ -2415,6 +2595,12 @@ async def tasks_pwa():
             <!-- Taak toevoegen knop -->
             <button class="add-task-btn" onclick="showAddTaskModal()">+ Taak toevoegen</button>
             <button class="refresh" onclick="loadTasks()">Vernieuwen</button>
+
+            <!-- Bonustaken beschikbaar -->
+            <div id="bonusTasksToday" class="card" style="margin-top:16px;display:none;">
+                <h3 style="color:#1e293b;font-size:16px;margin-bottom:12px;">⭐ Bonustaken beschikbaar</h3>
+                <div id="bonusTasksTodayList"></div>
+            </div>
         </div>
 
         <!-- VIEW: Weekrooster -->
@@ -2422,6 +2608,30 @@ async def tasks_pwa():
             <div class="card">
                 <div id="weekSchedule">
                     <div class="loading"><div class="spinner"></div>Laden...</div>
+                </div>
+            </div>
+
+            <!-- Bonustaken sectie -->
+            <div class="card" style="margin-top:16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <h2 style="color:#1e293b;font-size:18px;">⭐ Bonustaken</h2>
+                    <button onclick="showAddBonusTask()" style="background:#667eea;color:white;border:none;border-radius:50%;width:32px;height:32px;font-size:20px;cursor:pointer;">+</button>
+                </div>
+                <div id="bonusTasksList"></div>
+
+                <!-- Formulier voor nieuwe bonustaak (verborgen) -->
+                <div id="addBonusTaskForm" style="display:none;margin-top:12px;padding:12px;background:#f1f5f9;border-radius:8px;">
+                    <div class="form-group" style="margin-bottom:8px;">
+                        <input type="text" id="bonusTaskName" placeholder="Wat moet er gebeuren?" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:6px;">
+                    </div>
+                    <div class="form-group" style="margin-bottom:8px;">
+                        <label style="font-size:14px;color:#64748b;">Liefst op:</label>
+                        <input type="date" id="bonusTaskDate" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:6px;">
+                    </div>
+                    <div style="display:flex;gap:8px;">
+                        <button onclick="submitBonusTask()" style="flex:1;padding:10px;background:#22c55e;color:white;border:none;border-radius:6px;font-weight:600;">Toevoegen</button>
+                        <button onclick="hideAddBonusTask()" style="padding:10px 16px;background:#e2e8f0;color:#64748b;border:none;border-radius:6px;">Annuleer</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -3437,6 +3647,9 @@ async def tasks_pwa():
                     document.getElementById('tasks').innerHTML = '<div class="empty">Fout bij laden</div>';
                 }
             }
+
+            // Laad ook open bonustaken
+            loadOpenBonusTasks();
         }
 
         function renderTasks(data) {
@@ -4118,6 +4331,9 @@ async def tasks_pwa():
                     container.innerHTML = '<div class="empty">Kon rooster niet laden</div>';
                 }
             }
+
+            // Laad ook bonustaken
+            loadBonusTasks();
         }
 
         function renderWeekSchedule(data) {
@@ -4155,6 +4371,187 @@ async def tasks_pwa():
             });
 
             document.getElementById('weekSchedule').innerHTML = html;
+        }
+
+        // === BONUSTAKEN ===
+        const BONUS_CACHE_KEY = 'bonus_tasks_cache';
+
+        async function loadBonusTasks() {
+            try {
+                const res = await fetch(API + '/api/bonus-tasks');
+                const data = await res.json();
+                renderBonusTasks(data.tasks);
+            } catch (e) {
+                document.getElementById('bonusTasksList').innerHTML = '<div style="color:#94a3b8;font-size:14px;">Kon niet laden</div>';
+            }
+        }
+
+        function renderBonusTasks(tasks) {
+            const container = document.getElementById('bonusTasksList');
+            if (!tasks || tasks.length === 0) {
+                container.innerHTML = '<div style="color:#94a3b8;font-size:14px;">Nog geen bonustaken deze week</div>';
+                return;
+            }
+
+            const dayNames = ['zondag', 'maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag'];
+            let html = '';
+
+            tasks.forEach(t => {
+                const prefDate = new Date(t.preferred_date);
+                const dayName = dayNames[prefDate.getDay()];
+
+                if (t.completed_by) {
+                    html += '<div class="bonus-task-item completed">';
+                    html += '<div class="bonus-task-info">';
+                    html += '<div class="bonus-task-name">' + t.name + '</div>';
+                    html += '<div class="bonus-task-completed">✓ ' + t.completed_by + '</div>';
+                    html += '</div>';
+                    html += '</div>';
+                } else {
+                    html += '<div class="bonus-task-item">';
+                    html += '<div class="bonus-task-info">';
+                    html += '<div class="bonus-task-name">' + t.name + '</div>';
+                    html += '<div class="bonus-task-date">📅 ' + dayName + '</div>';
+                    html += '</div>';
+                    html += '<button class="bonus-delete-btn" onclick="deleteBonusTask(' + t.id + ')" title="Verwijderen">×</button>';
+                    html += '</div>';
+                }
+            });
+
+            container.innerHTML = html;
+        }
+
+        function showAddBonusTask() {
+            document.getElementById('addBonusTaskForm').style.display = 'block';
+            // Zet default datum op vandaag
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('bonusTaskDate').value = today;
+            document.getElementById('bonusTaskName').focus();
+        }
+
+        function hideAddBonusTask() {
+            document.getElementById('addBonusTaskForm').style.display = 'none';
+            document.getElementById('bonusTaskName').value = '';
+        }
+
+        async function submitBonusTask() {
+            const name = document.getElementById('bonusTaskName').value.trim();
+            const date = document.getElementById('bonusTaskDate').value;
+
+            if (!name) {
+                alert('Vul een taaknaam in');
+                return;
+            }
+            if (!date) {
+                alert('Kies een datum');
+                return;
+            }
+
+            try {
+                const res = await fetch(API + '/api/bonus-tasks', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name: name, preferred_date: date})
+                });
+
+                if (res.ok) {
+                    hideAddBonusTask();
+                    invalidateAllCache();
+                    loadBonusTasks();
+                } else {
+                    alert('Kon niet toevoegen');
+                }
+            } catch (e) {
+                alert('Fout bij verbinding');
+            }
+        }
+
+        async function deleteBonusTask(taskId) {
+            if (!confirm('Bonustaak verwijderen?')) return;
+
+            try {
+                const res = await fetch(API + '/api/bonus-tasks/' + taskId, {method: 'DELETE'});
+                if (res.ok) {
+                    invalidateAllCache();
+                    loadBonusTasks();
+                    loadOpenBonusTasks(); // Update ook Today view
+                } else {
+                    alert('Kon niet verwijderen');
+                }
+            } catch (e) {
+                alert('Fout bij verbinding');
+            }
+        }
+
+        async function claimBonusTask(taskId) {
+            if (!currentMember) {
+                alert('Kies eerst je naam');
+                return;
+            }
+
+            try {
+                const res = await fetch(API + '/api/bonus-tasks/' + taskId + '/complete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({member_name: currentMember})
+                });
+
+                if (res.ok) {
+                    // Celebration!
+                    const btn = event.target;
+                    const rect = btn.getBoundingClientRect();
+                    createConfetti(rect.left + rect.width/2, rect.top);
+                    if (navigator.vibrate) navigator.vibrate([50, 30, 100]);
+
+                    invalidateAllCache();
+                    loadOpenBonusTasks();
+                    loadBonusTasks(); // Update Week view als die open is
+                } else {
+                    alert('Kon niet claimen');
+                }
+            } catch (e) {
+                alert('Fout bij verbinding');
+            }
+        }
+
+        // Laad open bonustaken voor Today view
+        async function loadOpenBonusTasks() {
+            try {
+                const res = await fetch(API + '/api/bonus-tasks/open');
+                const data = await res.json();
+                renderOpenBonusTasks(data.tasks);
+            } catch (e) {
+                // Stil falen
+            }
+        }
+
+        function renderOpenBonusTasks(tasks) {
+            const container = document.getElementById('bonusTasksToday');
+            const list = document.getElementById('bonusTasksTodayList');
+
+            if (!tasks || tasks.length === 0) {
+                container.style.display = 'none';
+                return;
+            }
+
+            container.style.display = 'block';
+            const dayNames = ['zondag', 'maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag'];
+            let html = '';
+
+            tasks.forEach(t => {
+                const prefDate = new Date(t.preferred_date);
+                const dayName = dayNames[prefDate.getDay()];
+
+                html += '<div class="bonus-task-item">';
+                html += '<div class="bonus-task-info">';
+                html += '<div class="bonus-task-name">' + t.name + '</div>';
+                html += '<div class="bonus-task-date">📅 Liefst ' + dayName + '</div>';
+                html += '</div>';
+                html += '<button class="bonus-claim-btn" onclick="claimBonusTask(' + t.id + ')">Ik doe!</button>';
+                html += '</div>';
+            });
+
+            list.innerHTML = html;
         }
 
         // === STAND ===
@@ -4399,6 +4796,28 @@ async def tasks_pwa():
                 html += '</div>';
             });
             html += '</div>';
+
+            // Bonustaken stats
+            if (data.bonus_tasks) {
+                const bonusTotal = Object.values(data.bonus_tasks).reduce((a,b) => a+b, 0);
+                if (bonusTotal > 0) {
+                    html += '<div class="stats-section" style="background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);">';
+                    html += '<h3>⭐ Bonustaken deze week</h3>';
+                    const maxBonus = Math.max(...Object.values(data.bonus_tasks), 1);
+                    Object.entries(data.bonus_tasks).forEach(([name, count]) => {
+                        const pct = Math.round((count / maxBonus) * 100);
+                        const color = memberColors[name] || '#4f46e5';
+                        html += '<div style="margin-bottom:8px;">';
+                        html += '<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px;">';
+                        html += '<span>' + name + '</span><span style="font-weight:600;">' + count + '</span>';
+                        html += '</div>';
+                        html += '<div style="height:8px;background:#fff;border-radius:4px;overflow:hidden;">';
+                        html += '<div style="width:' + pct + '%;height:100%;background:' + color + ';border-radius:4px;transition:width 0.5s;"></div>';
+                        html += '</div></div>';
+                    });
+                    html += '</div>';
+                }
+            }
 
             // Personal stats per member
             members.forEach(([name, info]) => {
