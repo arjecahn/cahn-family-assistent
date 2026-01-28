@@ -3048,7 +3048,7 @@ async def tasks_pwa():
         const dayNamesNL = ['zondag', 'maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag'];
 
         // === What's New Modal ===
-        const WHATS_NEW_VERSION = 'push-notifications-v1';
+        const WHATS_NEW_VERSION = 'push-notifications-bonus-tasks-v2';
 
         function checkWhatsNew() {
             const seen = localStorage.getItem('whatsNewSeen');
