@@ -39,16 +39,17 @@ git push origin main
 ```
 cahn-family-assistent/
 ├── api/
-│   └── index.py          # Vercel serverless entry point
+│   └── index.py             # Vercel serverless entry point
 ├── src/
 │   ├── __init__.py
-│   ├── main.py           # FastAPI app + API endpoints
-│   ├── models.py         # Pydantic data models
-│   ├── database.py       # PostgreSQL/Supabase operations
-│   ├── task_engine.py    # Core business logic (fair distribution)
-│   └── voice_handlers.py # (Legacy) Google Actions handlers
-├── vercel.json           # Vercel deployment config
-├── requirements.txt      # Python dependencies
+│   ├── main.py              # FastAPI app + API endpoints
+│   ├── models.py            # Pydantic data models
+│   ├── database.py          # PostgreSQL/Supabase operations
+│   ├── task_engine.py       # Core business logic (fair distribution)
+│   ├── push_notifications.py # Push notification service
+│   └── voice_handlers.py    # (Legacy) Google Actions handlers
+├── vercel.json              # Vercel deployment config + cron jobs
+├── requirements.txt         # Python dependencies
 └── CLAUDE.md
 ```
 
@@ -79,6 +80,7 @@ PostgreSQL via Supabase met automatische URL parsing voor Vercel compatibility.
 - `completions` - Voltooide taken met week_number
 - `absences` - Afwezigheidsperiodes
 - `swaps` - Ruil verzoeken
+- `push_subscriptions` - Push notification subscriptions per device
 
 ### API Endpoints (`src/main.py`)
 
@@ -97,6 +99,12 @@ PostgreSQL via Supabase met automatische URL parsing voor Vercel compatibility.
 | `/api/absence` | POST | Registreer afwezigheid |
 | `/api/swap/request` | POST | Vraag ruil aan |
 | `/api/swap/respond` | POST | Accepteer/weiger ruil |
+| `/api/vapid-public-key` | GET | VAPID public key voor push subscription |
+| `/api/push/subscribe` | POST | Registreer push subscription |
+| `/api/push/unsubscribe` | POST | Verwijder push subscription |
+| `/api/push/test` | POST | Stuur test notificatie |
+| `/api/push/morning-reminders` | POST | Stuur ochtend herinneringen (cron: 7:00) |
+| `/api/push/evening-reminders` | POST | Stuur avond herinneringen (cron: 18:00) |
 
 ## Environment Variables
 
@@ -104,6 +112,23 @@ PostgreSQL via Supabase met automatische URL parsing voor Vercel compatibility.
 |----------|--------------|
 | `DATABASE_URL` | PostgreSQL connection string (Supabase) |
 | `POSTGRES_URL` | Alternatieve naam voor database URL |
+| `VAPID_PRIVATE_KEY` | Private key voor push notificaties (base64) |
+| `VAPID_PUBLIC_KEY` | Public key voor push notificaties (base64) |
+| `VAPID_CLAIMS_EMAIL` | Contact email voor VAPID claims (vereist door spec) |
+
+### VAPID Keys Genereren
+
+Voor push notificaties heb je VAPID keys nodig. Genereer ze eenmalig:
+
+```python
+from py_vapid import Vapid
+vapid = Vapid()
+vapid.generate_keys()
+print("Private:", vapid.private_pem())
+print("Public:", vapid.public_key_urlsafe_base64())
+```
+
+Voeg de keys toe aan Vercel Environment Variables.
 
 ## ChatGPT Custom GPT Setup
 
@@ -249,6 +274,24 @@ De app heeft een Progressive Web App op `/taken` met de volgende features:
 - `/api/calendar/{naam}.ics` - Persoonlijke feed (nora, linde, fenna)
 - Bevat VALARM reminders (15 min van tevoren)
 - **Let op**: Kalender-apps (Google Calendar, Apple Calendar) hebben eigen refresh intervals (12-24 uur). De PWA is betrouwbaarder voor real-time updates.
+
+### Push Notificaties
+De PWA ondersteunt push notificaties op iOS 16.4+ (alleen als geïnstalleerd op homescreen).
+
+**Automatische herinneringen (via Vercel Cron):**
+- 07:00 CET: "Goedemorgen! Vandaag: [taken]" - Ochtend reminder
+- 18:00 CET: "Nog te doen: [openstaande taken]" - Avond reminder
+
+**Hoe inschakelen:**
+1. Installeer PWA op homescreen (Safari > Deel > Zet op beginscherm)
+2. Open app, ga naar Regels tab
+3. Klik "Notificaties inschakelen"
+4. Geef toestemming in iOS popup
+
+**iOS beperkingen:**
+- Werkt alleen in geïnstalleerde PWA, niet in Safari browser
+- Vereist user gesture (button tap) voor permission
+- iOS 16.4+ vereist
 
 ### Animaties/Effecten
 De PWA heeft veel visuele effecten die allemaal uitgeschakeld kunnen worden via de checkbox "Enough with the flying emojis!" (opgeslagen in localStorage als `disableEmojis`).

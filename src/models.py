@@ -110,3 +110,14 @@ class CustomRule(BaseModel):
     description: Optional[str] = None
     active: bool = True
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class PushSubscription(BaseModel):
+    """Push notification subscription voor een gezinslid."""
+    id: str
+    member_id: Optional[str] = None
+    member_name: str
+    endpoint: str
+    p256dh: str  # Public key for encryption
+    auth: str    # Auth secret
+    created_at: datetime = Field(default_factory=datetime.utcnow)

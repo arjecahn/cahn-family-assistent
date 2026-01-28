@@ -13,7 +13,13 @@ from .database import (
     get_member_by_name, get_task_by_name, get_last_completion_for_member, delete_completion,
     migrate_add_cascade_delete, migrate_add_schedule_table, migrate_add_missed_tasks_table,
     migrate_add_member_email, update_member_email, get_all_members,
-    get_missed_tasks_for_week, get_missed_tasks_for_member
+    get_missed_tasks_for_week, get_missed_tasks_for_member,
+    add_push_subscription, delete_push_subscription_by_endpoint,
+    get_push_subscriptions_for_member, migrate_add_push_subscriptions_table
+)
+from .push_notifications import (
+    get_vapid_public_key, send_push_notification, send_push_to_all,
+    send_morning_reminder, send_evening_reminder
 )
 from .voice_handlers import handle_google_action
 from .calendar_generator import generate_ical
@@ -127,6 +133,187 @@ async def run_member_email_migration():
         return {"status": "ok", "message": "email kolom toegevoegd aan members tabel"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/migrate/push-subscriptions")
+async def run_push_subscriptions_migration():
+    """Voer migratie uit om push_subscriptions tabel toe te voegen.
+
+    Veilig om meerdere keren uit te voeren.
+    """
+    try:
+        migrate_add_push_subscriptions_table()
+        return {"status": "ok", "message": "push_subscriptions tabel aangemaakt"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# === Push Notification Endpoints ===
+
+@app.get("/api/vapid-public-key")
+async def vapid_public_key():
+    """Geef de VAPID public key voor push notification subscriptions."""
+    key = get_vapid_public_key()
+    if not key:
+        raise HTTPException(status_code=503, detail="VAPID keys niet geconfigureerd")
+    return {"publicKey": key}
+
+
+class PushSubscribeRequest(BaseModel):
+    member_name: str
+    endpoint: str
+    p256dh: str
+    auth: str
+
+
+@app.post("/api/push/subscribe")
+async def push_subscribe(request: PushSubscribeRequest):
+    """Registreer een push notification subscription."""
+    try:
+        sub = add_push_subscription(
+            member_name=request.member_name,
+            endpoint=request.endpoint,
+            p256dh=request.p256dh,
+            auth=request.auth
+        )
+        return {
+            "success": True,
+            "message": f"Push notificaties ingeschakeld voor {request.member_name}",
+            "subscription_id": sub.id
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class PushUnsubscribeRequest(BaseModel):
+    endpoint: str
+
+
+@app.post("/api/push/unsubscribe")
+async def push_unsubscribe(request: PushUnsubscribeRequest):
+    """Verwijder een push notification subscription."""
+    deleted = delete_push_subscription_by_endpoint(request.endpoint)
+    return {
+        "success": deleted,
+        "message": "Subscription verwijderd" if deleted else "Subscription niet gevonden"
+    }
+
+
+class PushTestRequest(BaseModel):
+    member_name: str
+
+
+@app.post("/api/push/test")
+async def push_test(request: PushTestRequest):
+    """Stuur een test notificatie naar een gezinslid."""
+    result = send_push_notification(
+        member_name=request.member_name,
+        title="Test notificatie",
+        body=f"Hoi {request.member_name}! Push notificaties werken.",
+        data={"type": "test"}
+    )
+    return result
+
+
+@app.get("/api/push/status/{member_name}")
+async def push_status(member_name: str):
+    """Check of een gezinslid push notificaties heeft ingeschakeld."""
+    subs = get_push_subscriptions_for_member(member_name)
+    return {
+        "member_name": member_name,
+        "enabled": len(subs) > 0,
+        "device_count": len(subs)
+    }
+
+
+@app.post("/api/push/morning-reminders")
+async def send_morning_reminders():
+    """Stuur ochtend herinneringen naar alle gezinsleden.
+
+    Dit endpoint kan worden aangeroepen door een externe cron job (bijv. Vercel Cron)
+    om 7:00 uur 's ochtends.
+    """
+    from .database import today_local, get_all_members
+    from .task_engine import engine
+
+    today = today_local()
+    week_number = today.isocalendar()[1]
+    year = today.isocalendar()[0]
+    day_of_week = today.weekday()
+
+    # Haal het rooster voor vandaag
+    schedule = engine.get_week_schedule()
+    members = get_all_members()
+
+    results = {}
+    for member in members:
+        # Verzamel taken voor dit gezinslid vandaag
+        member_tasks = []
+        day_name = ["ma", "di", "wo", "do", "vr", "za", "zo"][day_of_week]
+
+        if day_name in schedule.get("schedule", {}):
+            day_schedule = schedule["schedule"][day_name]
+            for task_name, assigned_member in day_schedule.items():
+                if assigned_member == member.name:
+                    member_tasks.append(task_name)
+
+        # Stuur notificatie als er taken zijn
+        if member_tasks:
+            result = send_morning_reminder(member.name, member_tasks)
+            results[member.name] = result
+        else:
+            results[member.name] = {"skipped": True, "reason": "Geen taken vandaag"}
+
+    return {"results": results}
+
+
+@app.post("/api/push/evening-reminders")
+async def send_evening_reminders():
+    """Stuur avond herinneringen voor openstaande taken.
+
+    Dit endpoint kan worden aangeroepen door een externe cron job (bijv. Vercel Cron)
+    om 18:00 uur.
+    """
+    from .database import today_local, get_all_members, get_completions_for_week
+    from .task_engine import engine
+
+    today = today_local()
+    week_number = today.isocalendar()[1]
+    year = today.isocalendar()[0]
+    day_of_week = today.weekday()
+
+    # Haal het rooster en completions voor vandaag
+    schedule = engine.get_week_schedule()
+    completions = get_completions_for_week(week_number)
+    members = get_all_members()
+
+    # Maak set van voltooide taken vandaag
+    completed_today = set()
+    for c in completions:
+        if c.completed_at.date() == today:
+            completed_today.add((c.member_name, c.task_name))
+
+    results = {}
+    for member in members:
+        # Verzamel openstaande taken voor dit gezinslid vandaag
+        open_tasks = []
+        day_name = ["ma", "di", "wo", "do", "vr", "za", "zo"][day_of_week]
+
+        if day_name in schedule.get("schedule", {}):
+            day_schedule = schedule["schedule"][day_name]
+            for task_name, assigned_member in day_schedule.items():
+                if assigned_member == member.name:
+                    if (member.name, task_name) not in completed_today:
+                        open_tasks.append(task_name)
+
+        # Stuur notificatie als er openstaande taken zijn
+        if open_tasks:
+            result = send_evening_reminder(member.name, open_tasks)
+            results[member.name] = result
+        else:
+            results[member.name] = {"skipped": True, "reason": "Alle taken gedaan!"}
+
+    return {"results": results}
 
 
 @app.get("/api/members")
@@ -2239,6 +2426,32 @@ async def tasks_pwa():
             </div>
 
             <div class="card" style="margin-top:16px;">
+                <h2 style="margin-bottom:16px;color:#1e293b;">🔔 Push Notificaties</h2>
+                <p style="color:#64748b;font-size:14px;margin-bottom:16px;">
+                    Ontvang herinneringen op je telefoon: 's ochtends om 7:00 je taken voor vandaag, 's avonds om 18:00 welke nog open staan.
+                </p>
+                <div id="pushNotSupported" style="display:none;background:#fef3c7;padding:12px;border-radius:8px;margin-bottom:12px;">
+                    <span style="color:#92400e;font-size:14px;">
+                        ⚠️ Push notificaties worden niet ondersteund.<br>
+                        <small>Tip: Installeer de app op je homescreen (iOS 16.4+)</small>
+                    </span>
+                </div>
+                <div id="pushStatus" style="margin-bottom:12px;font-size:14px;"></div>
+                <div style="display:flex;flex-direction:column;gap:10px;">
+                    <button class="submit-btn" id="enablePushBtn" onclick="enablePushNotifications()" style="background:#22c55e;">
+                        🔔 Notificaties inschakelen
+                    </button>
+                    <button class="submit-btn" id="disablePushBtn" onclick="disablePushNotifications()" style="background:#ef4444;display:none;">
+                        🔕 Notificaties uitschakelen
+                    </button>
+                    <button class="submit-btn" id="testPushBtn" onclick="testPushNotification()" style="background:#8b5cf6;display:none;">
+                        📤 Test notificatie sturen
+                    </button>
+                </div>
+                <div id="pushResult" style="margin-top:12px;text-align:center;font-size:13px;"></div>
+            </div>
+
+            <div class="card" style="margin-top:16px;">
                 <h2 style="margin-bottom:16px;color:#1e293b;">📆 Kalender abonnement</h2>
                 <p style="color:#64748b;font-size:14px;margin-bottom:16px;">
                     Voeg je taken toe aan je telefoon-kalender. Kies jouw naam en krijg een herinnering 15 min van tevoren.
@@ -3562,7 +3775,7 @@ async def tasks_pwa():
             if (viewId === 'viewWeek') loadWeekSchedule();
             if (viewId === 'viewStand') loadStand();
             if (viewId === 'viewAbsence') loadUpcomingAbsences();
-            if (viewId === 'viewSettings') { loadRules(); loadTaskOptions(); }
+            if (viewId === 'viewSettings') { loadRules(); loadTaskOptions(); initPushNotifications(); }
         }
 
         // === WEEKROOSTER ===
@@ -4261,13 +4474,212 @@ async def tasks_pwa():
                 prompt('Kopieer deze URL:', calendarUrl);
             }
         }
+
+        // === Push Notification Functions ===
+        let swRegistration = null;
+        let vapidPublicKey = null;
+
+        async function initPushNotifications() {
+            const notSupportedEl = document.getElementById('pushNotSupported');
+            const statusEl = document.getElementById('pushStatus');
+            const enableBtn = document.getElementById('enablePushBtn');
+            const disableBtn = document.getElementById('disablePushBtn');
+            const testBtn = document.getElementById('testPushBtn');
+
+            // Check of push ondersteund wordt
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+                notSupportedEl.style.display = 'block';
+                enableBtn.style.display = 'none';
+                return;
+            }
+
+            // Check of we in standalone mode zijn (PWA)
+            const isStandalone = window.matchMedia('(display-mode: standalone)').matches ||
+                                 window.navigator.standalone === true;
+
+            if (!isStandalone) {
+                statusEl.innerHTML = '<span style="color:#f59e0b;">📱 Installeer eerst de app op je homescreen voor notificaties</span>';
+                return;
+            }
+
+            // Wacht op service worker registration
+            try {
+                swRegistration = await navigator.serviceWorker.ready;
+
+                // Haal VAPID public key op
+                const keyRes = await fetch('/api/vapid-public-key');
+                if (!keyRes.ok) {
+                    statusEl.innerHTML = '<span style="color:#ef4444;">Push niet geconfigureerd op server</span>';
+                    enableBtn.style.display = 'none';
+                    return;
+                }
+                const keyData = await keyRes.json();
+                vapidPublicKey = keyData.publicKey;
+
+                // Check huidige subscription status
+                const subscription = await swRegistration.pushManager.getSubscription();
+                updatePushUI(subscription !== null);
+            } catch (e) {
+                console.error('Push init error:', e);
+                statusEl.innerHTML = '<span style="color:#ef4444;">Fout bij initialisatie</span>';
+            }
+        }
+
+        function updatePushUI(isSubscribed) {
+            const statusEl = document.getElementById('pushStatus');
+            const enableBtn = document.getElementById('enablePushBtn');
+            const disableBtn = document.getElementById('disablePushBtn');
+            const testBtn = document.getElementById('testPushBtn');
+
+            if (isSubscribed) {
+                statusEl.innerHTML = '<span style="color:#22c55e;">✅ Notificaties zijn ingeschakeld voor ' + currentMember + '</span>';
+                enableBtn.style.display = 'none';
+                disableBtn.style.display = 'block';
+                testBtn.style.display = 'block';
+            } else {
+                statusEl.innerHTML = '<span style="color:#64748b;">Notificaties zijn uitgeschakeld</span>';
+                enableBtn.style.display = 'block';
+                disableBtn.style.display = 'none';
+                testBtn.style.display = 'none';
+            }
+        }
+
+        async function enablePushNotifications() {
+            const resultEl = document.getElementById('pushResult');
+
+            if (!currentMember) {
+                resultEl.innerHTML = '<span style="color:#ef4444;">Selecteer eerst wie je bent (Vandaag tab)</span>';
+                return;
+            }
+
+            try {
+                resultEl.innerHTML = '<span style="color:#64748b;">Toestemming vragen...</span>';
+
+                // Vraag notificatie toestemming
+                const permission = await Notification.requestPermission();
+                if (permission !== 'granted') {
+                    resultEl.innerHTML = '<span style="color:#ef4444;">Toestemming geweigerd. Check je instellingen.</span>';
+                    return;
+                }
+
+                resultEl.innerHTML = '<span style="color:#64748b;">Registreren...</span>';
+
+                // Subscribe bij push service
+                const subscription = await swRegistration.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
+                });
+
+                // Stuur subscription naar server
+                const subJson = subscription.toJSON();
+                const res = await fetch('/api/push/subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        member_name: currentMember,
+                        endpoint: subJson.endpoint,
+                        p256dh: subJson.keys.p256dh,
+                        auth: subJson.keys.auth
+                    })
+                });
+
+                if (res.ok) {
+                    resultEl.innerHTML = '<span style="color:#22c55e;">✅ Notificaties ingeschakeld!</span>';
+                    updatePushUI(true);
+                } else {
+                    throw new Error('Server error');
+                }
+            } catch (e) {
+                console.error('Push subscribe error:', e);
+                resultEl.innerHTML = '<span style="color:#ef4444;">Fout: ' + e.message + '</span>';
+            }
+
+            setTimeout(() => { resultEl.innerHTML = ''; }, 5000);
+        }
+
+        async function disablePushNotifications() {
+            const resultEl = document.getElementById('pushResult');
+
+            try {
+                const subscription = await swRegistration.pushManager.getSubscription();
+                if (subscription) {
+                    // Unsubscribe lokaal
+                    await subscription.unsubscribe();
+
+                    // Verwijder van server
+                    await fetch('/api/push/unsubscribe', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ endpoint: subscription.endpoint })
+                    });
+                }
+
+                resultEl.innerHTML = '<span style="color:#22c55e;">Notificaties uitgeschakeld</span>';
+                updatePushUI(false);
+            } catch (e) {
+                console.error('Push unsubscribe error:', e);
+                resultEl.innerHTML = '<span style="color:#ef4444;">Fout bij uitschakelen</span>';
+            }
+
+            setTimeout(() => { resultEl.innerHTML = ''; }, 3000);
+        }
+
+        async function testPushNotification() {
+            const resultEl = document.getElementById('pushResult');
+
+            if (!currentMember) {
+                resultEl.innerHTML = '<span style="color:#ef4444;">Selecteer eerst wie je bent</span>';
+                return;
+            }
+
+            try {
+                resultEl.innerHTML = '<span style="color:#64748b;">Test versturen...</span>';
+
+                const res = await fetch('/api/push/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ member_name: currentMember })
+                });
+
+                const data = await res.json();
+                if (data.success > 0) {
+                    resultEl.innerHTML = '<span style="color:#22c55e;">✅ Test verstuurd! Check je notificaties.</span>';
+                } else {
+                    resultEl.innerHTML = '<span style="color:#ef4444;">Geen notificatie verstuurd: ' + (data.error || 'onbekende fout') + '</span>';
+                }
+            } catch (e) {
+                resultEl.innerHTML = '<span style="color:#ef4444;">Fout: ' + e.message + '</span>';
+            }
+
+            setTimeout(() => { resultEl.innerHTML = ''; }, 5000);
+        }
+
+        // Helper: Base64 URL naar Uint8Array
+        function urlBase64ToUint8Array(base64String) {
+            const padding = '='.repeat((4 - base64String.length % 4) % 4);
+            const base64 = (base64String + padding)
+                .replace(/\\-/g, '+')
+                .replace(/_/g, '/');
+
+            const rawData = window.atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+
+            for (let i = 0; i < rawData.length; ++i) {
+                outputArray[i] = rawData.charCodeAt(i);
+            }
+            return outputArray;
+        }
     </script>
     <script>
         // Register Service Worker
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/sw.js')
-                    .then(reg => console.log('SW registered:', reg.scope))
+                    .then(reg => {
+                        console.log('SW registered:', reg.scope);
+                        // Init push na SW registration
+                        initPushNotifications();
+                    })
                     .catch(err => console.log('SW registration failed:', err));
             });
         }
@@ -4693,9 +5105,9 @@ async def apple_touch_icon():
 
 @app.get("/sw.js")
 async def service_worker():
-    """Service Worker voor offline caching."""
+    """Service Worker voor offline caching en push notificaties."""
     sw_code = '''
-const CACHE_NAME = 'family-chores-v1';
+const CACHE_NAME = 'family-chores-v2';
 const STATIC_ASSETS = [
     '/taken',
     '/manifest.json',
@@ -4759,6 +5171,52 @@ self.addEventListener('fetch', (event) => {
                     }
                     return new Response('Offline', { status: 503 });
                 });
+            })
+    );
+});
+
+// Push event - toon notificatie
+self.addEventListener('push', (event) => {
+    let data = {};
+    try {
+        data = event.data ? event.data.json() : {};
+    } catch (e) {
+        data = { title: 'Family Chores', body: event.data ? event.data.text() : '' };
+    }
+
+    const title = data.title || 'Family Chores';
+    const options = {
+        body: data.body || '',
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        vibrate: [200, 100, 200],
+        data: data.data || {},
+        tag: data.data?.type || 'default',
+        renotify: true
+    };
+
+    event.waitUntil(
+        self.registration.showNotification(title, options)
+    );
+});
+
+// Notificatie click - open app
+self.addEventListener('notificationclick', (event) => {
+    event.notification.close();
+
+    event.waitUntil(
+        clients.matchAll({ type: 'window', includeUncontrolled: true })
+            .then((clientList) => {
+                // Check of de app al open is
+                for (const client of clientList) {
+                    if (client.url.includes('/taken') && 'focus' in client) {
+                        return client.focus();
+                    }
+                }
+                // Anders open een nieuwe window
+                if (clients.openWindow) {
+                    return clients.openWindow('/taken');
+                }
             })
     );
 });

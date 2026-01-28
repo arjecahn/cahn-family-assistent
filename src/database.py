@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from .models import Member, Task, Completion, Absence, Swap, ScheduleAssignment, MissedTask
+from .models import Member, Task, Completion, Absence, Swap, ScheduleAssignment, MissedTask, PushSubscription
 
 # Timezone voor de familie (Nederland)
 TIMEZONE = ZoneInfo("Europe/Amsterdam")
@@ -185,6 +185,20 @@ def init_db():
             member_name VARCHAR(50) NOT NULL,
             created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(task_date, task_id, member_id)
+        )
+    """)
+
+    # Push subscriptions - voor push notificaties naar PWA
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id SERIAL PRIMARY KEY,
+            member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+            member_name VARCHAR(50) NOT NULL,
+            endpoint TEXT NOT NULL,
+            p256dh TEXT NOT NULL,
+            auth TEXT NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(member_id, endpoint)
         )
     """)
 
@@ -1704,3 +1718,131 @@ def get_missed_tasks_for_member(member_id: str, limit: int = 20) -> list[MissedT
         expired=r["expired"],
         created_at=r["created_at"]
     ) for r in rows]
+
+
+# CRUD operaties voor Push Subscriptions
+def add_push_subscription(member_name: str, endpoint: str, p256dh: str, auth: str) -> PushSubscription:
+    """Voeg een push subscription toe of update bestaande."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Haal member_id op
+    cur.execute("SELECT id FROM members WHERE LOWER(name) = LOWER(%s)", (member_name,))
+    member_row = cur.fetchone()
+    member_id = member_row["id"] if member_row else None
+
+    try:
+        # Upsert: als endpoint al bestaat voor deze member, update de keys
+        cur.execute("""
+            INSERT INTO push_subscriptions (member_id, member_name, endpoint, p256dh, auth)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (member_id, endpoint) DO UPDATE SET
+                p256dh = EXCLUDED.p256dh,
+                auth = EXCLUDED.auth
+            RETURNING id, created_at
+        """, (member_id, member_name, endpoint, p256dh, auth))
+        result = cur.fetchone()
+        conn.commit()
+
+        return PushSubscription(
+            id=str(result["id"]),
+            member_id=str(member_id) if member_id else None,
+            member_name=member_name,
+            endpoint=endpoint,
+            p256dh=p256dh,
+            auth=auth,
+            created_at=result["created_at"]
+        )
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_push_subscriptions_for_member(member_name: str) -> list[PushSubscription]:
+    """Haal alle push subscriptions op voor een gezinslid."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, member_id, member_name, endpoint, p256dh, auth, created_at
+        FROM push_subscriptions
+        WHERE LOWER(member_name) = LOWER(%s)
+    """, (member_name,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return [PushSubscription(
+        id=str(r["id"]),
+        member_id=str(r["member_id"]) if r["member_id"] else None,
+        member_name=r["member_name"],
+        endpoint=r["endpoint"],
+        p256dh=r["p256dh"],
+        auth=r["auth"],
+        created_at=r["created_at"]
+    ) for r in rows]
+
+
+def get_all_push_subscriptions() -> list[PushSubscription]:
+    """Haal alle push subscriptions op."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, member_id, member_name, endpoint, p256dh, auth, created_at
+        FROM push_subscriptions
+    """)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return [PushSubscription(
+        id=str(r["id"]),
+        member_id=str(r["member_id"]) if r["member_id"] else None,
+        member_name=r["member_name"],
+        endpoint=r["endpoint"],
+        p256dh=r["p256dh"],
+        auth=r["auth"],
+        created_at=r["created_at"]
+    ) for r in rows]
+
+
+def delete_push_subscription_by_endpoint(endpoint: str) -> bool:
+    """Verwijder een push subscription op basis van endpoint."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM push_subscriptions WHERE endpoint = %s", (endpoint,))
+    deleted = cur.rowcount > 0
+    conn.commit()
+    cur.close()
+    conn.close()
+    return deleted
+
+
+def migrate_add_push_subscriptions_table():
+    """Migratie: voeg push_subscriptions tabel toe aan bestaande database."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS push_subscriptions (
+                id SERIAL PRIMARY KEY,
+                member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+                member_name VARCHAR(50) NOT NULL,
+                endpoint TEXT NOT NULL,
+                p256dh TEXT NOT NULL,
+                auth TEXT NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(member_id, endpoint)
+            )
+        """)
+        conn.commit()
+        print("push_subscriptions tabel aangemaakt!")
+
+    except Exception as e:
+        conn.rollback()
+        print(f"Migratie fout: {e}")
+        raise e
+
+    finally:
+        cur.close()
+        conn.close()
