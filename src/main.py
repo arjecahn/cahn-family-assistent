@@ -3333,6 +3333,9 @@ async def tasks_pwa():
                     localStorage.removeItem(key);
                 }
             }
+            // Ook week en stand cache invalideren
+            localStorage.removeItem('week_schedule_cache');
+            localStorage.removeItem('stand_cache');
         }
 
         async function fetchTasks(member, dateStr) {
@@ -4025,16 +4028,46 @@ async def tasks_pwa():
         }
 
         // === WEEKROOSTER ===
+        const WEEK_CACHE_KEY = 'week_schedule_cache';
+
+        function getWeekCache() {
+            try {
+                const cached = localStorage.getItem(WEEK_CACHE_KEY);
+                if (!cached) return null;
+                const {data, timestamp} = JSON.parse(cached);
+                if (Date.now() - timestamp < CACHE_MAX_AGE) return data;
+                localStorage.removeItem(WEEK_CACHE_KEY);
+                return null;
+            } catch (e) { return null; }
+        }
+
+        function setWeekCache(data) {
+            try {
+                localStorage.setItem(WEEK_CACHE_KEY, JSON.stringify({data, timestamp: Date.now()}));
+            } catch (e) {}
+        }
+
         async function loadWeekSchedule() {
             const container = document.getElementById('weekSchedule');
-            container.innerHTML = '<div class="loading"><div class="spinner"></div>Laden...</div>';
+            const cached = getWeekCache();
 
+            // Direct gecachede data tonen
+            if (cached) {
+                renderWeekSchedule(cached);
+            } else {
+                container.innerHTML = '<div class="loading"><div class="spinner"></div>Laden...</div>';
+            }
+
+            // Verse data ophalen
             try {
                 const res = await fetch(API + '/api/schedule');
                 const data = await res.json();
+                setWeekCache(data);
                 renderWeekSchedule(data);
             } catch (e) {
-                container.innerHTML = '<div class="empty">Kon rooster niet laden</div>';
+                if (!cached) {
+                    container.innerHTML = '<div class="empty">Kon rooster niet laden</div>';
+                }
             }
         }
 
@@ -4189,16 +4222,45 @@ async def tasks_pwa():
             return svg;
         }
 
+        const STAND_CACHE_KEY = 'stand_cache';
+
+        function getStandCache() {
+            try {
+                const cached = localStorage.getItem(STAND_CACHE_KEY);
+                if (!cached) return null;
+                const {data, timestamp} = JSON.parse(cached);
+                if (Date.now() - timestamp < CACHE_MAX_AGE) return data;
+                localStorage.removeItem(STAND_CACHE_KEY);
+                return null;
+            } catch (e) { return null; }
+        }
+
+        function setStandCache(data) {
+            try {
+                localStorage.setItem(STAND_CACHE_KEY, JSON.stringify({data, timestamp: Date.now()}));
+            } catch (e) {}
+        }
+
         async function loadStand() {
             const container = document.getElementById('standContent');
-            container.innerHTML = '<div class="loading"><div class="spinner"></div>Laden...</div>';
+            const cached = getStandCache();
+
+            if (cached) {
+                statsData = cached;
+                renderStand();
+            } else {
+                container.innerHTML = '<div class="loading"><div class="spinner"></div>Laden...</div>';
+            }
 
             try {
                 const res = await fetch(API + '/api/stats');
                 statsData = await res.json();
+                setStandCache(statsData);
                 renderStand();
             } catch (e) {
-                container.innerHTML = '<div class="empty">Kon statistieken niet laden</div>';
+                if (!cached) {
+                    container.innerHTML = '<div class="empty">Kon statistieken niet laden</div>';
+                }
             }
         }
 
