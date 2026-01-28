@@ -4704,8 +4704,8 @@ async def tasks_pwa():
             const memberColors = {Nora: '#8b5cf6', Linde: '#f97316', Fenna: '#22c55e'};
 
             // Get task categories (simplified)
-            const categories = ['uitruimen', 'inruimen', 'dekken', 'koken', 'karton', 'glas'];
-            const categoryLabels = ['Uitruimen', 'Inruimen', 'Dekken', 'Koken', 'Karton', 'Glas'];
+            const categories = ['uitruimen', 'inruimen', 'dekken', 'koken', 'karton', 'glas', 'bonustaken'];
+            const categoryLabels = ['Uitruimen', 'Inruimen', 'Dekken', 'Koken', 'Karton', 'Glas', 'Bonus'];
             const numCategories = categories.length;
             const angleSlice = (2 * Math.PI) / numCategories;
 
