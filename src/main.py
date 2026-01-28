@@ -212,7 +212,7 @@ async def push_test(request: PushTestRequest):
     today = today_local()
     week_number = today.isocalendar()[1]
     day_of_week = today.weekday()
-    day_name = ["ma", "di", "wo", "do", "vr", "za", "zo"][day_of_week]
+    day_name = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"][day_of_week]
 
     # Haal het rooster
     schedule = engine.get_week_schedule()
@@ -239,11 +239,17 @@ async def push_test(request: PushTestRequest):
 
     results = {"morning": None, "evening": None}
 
-    # Stuur ochtend notificatie
+    # Stuur ochtend notificatie (altijd, ook als test)
     if member_tasks:
         results["morning"] = send_morning_reminder(request.member_name, member_tasks)
     else:
-        results["morning"] = {"skipped": True, "reason": "Geen taken vandaag"}
+        # Stuur toch een test notificatie
+        results["morning"] = send_push_notification(
+            request.member_name,
+            f"Goedemorgen {request.member_name}!",
+            "Geen taken vandaag - lekker vrij!",
+            {"type": "morning_reminder"}
+        )
 
     # Stuur avond notificatie (na 2 sec delay zodat ze apart aankomen)
     import asyncio
@@ -252,7 +258,13 @@ async def push_test(request: PushTestRequest):
     if open_tasks:
         results["evening"] = send_evening_reminder(request.member_name, open_tasks)
     else:
-        results["evening"] = {"skipped": True, "reason": "Alle taken al gedaan!"}
+        # Stuur toch een test notificatie
+        results["evening"] = send_push_notification(
+            request.member_name,
+            f"Goed gedaan {request.member_name}!",
+            "Alle taken zijn af!" if member_tasks else "Geen taken vandaag",
+            {"type": "evening_reminder"}
+        )
 
     return results
 
@@ -287,11 +299,12 @@ async def send_morning_reminders():
     schedule = engine.get_week_schedule()
     members = get_all_members()
 
+    day_name = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"][day_of_week]
+
     results = {}
     for member in members:
         # Verzamel taken voor dit gezinslid vandaag
         member_tasks = []
-        day_name = ["ma", "di", "wo", "do", "vr", "za", "zo"][day_of_week]
 
         if day_name in schedule.get("schedule", {}):
             day_schedule = schedule["schedule"][day_name]
@@ -335,11 +348,12 @@ async def send_evening_reminders():
         if c.completed_at.date() == today:
             completed_today.add((c.member_name, c.task_name))
 
+    day_name = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"][day_of_week]
+
     results = {}
     for member in members:
         # Verzamel openstaande taken voor dit gezinslid vandaag
         open_tasks = []
-        day_name = ["ma", "di", "wo", "do", "vr", "za", "zo"][day_of_week]
 
         if day_name in schedule.get("schedule", {}):
             day_schedule = schedule["schedule"][day_name]
