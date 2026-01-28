@@ -173,3 +173,100 @@ def send_evening_reminder(member_name: str, open_tasks: list[str]) -> dict:
     body = f"Nog open: {task_list}"
 
     return send_push_notification(member_name, title, body, {"type": "evening_reminder"})
+
+
+def send_summary_to_endpoint(endpoint: str, p256dh: str, auth: str, title: str, body: str, data: dict = None) -> dict:
+    """Stuur een notificatie naar een specifiek endpoint (device).
+
+    Args:
+        endpoint: Push endpoint URL
+        p256dh: Public key
+        auth: Auth secret
+        title: Titel van de notificatie
+        body: Body tekst
+        data: Extra data (optioneel)
+
+    Returns:
+        Result dict
+    """
+    if not VAPID_PRIVATE_KEY:
+        return {"error": "VAPID keys niet geconfigureerd", "success": 0}
+
+    payload = json.dumps({
+        "title": title,
+        "body": body,
+        "data": data or {}
+    })
+
+    try:
+        webpush(
+            subscription_info={
+                "endpoint": endpoint,
+                "keys": {"p256dh": p256dh, "auth": auth}
+            },
+            data=payload,
+            vapid_private_key=VAPID_PRIVATE_KEY,
+            vapid_claims={"sub": VAPID_CLAIMS_EMAIL}
+        )
+        return {"success": 1, "failed": 0}
+    except WebPushException as e:
+        if e.response and e.response.status_code == 410:
+            delete_push_subscription_by_endpoint(endpoint)
+        return {"success": 0, "failed": 1, "error": str(e)}
+    except Exception as e:
+        return {"success": 0, "failed": 1, "error": str(e)}
+
+
+def send_morning_summary(tasks_by_member: dict[str, list[str]], endpoint: str, p256dh: str, auth: str) -> dict:
+    """Stuur ochtend samenvatting met alle taken voor iedereen.
+
+    Args:
+        tasks_by_member: Dict van {naam: [taken]}
+        endpoint: Push endpoint
+        p256dh: Public key
+        auth: Auth secret
+
+    Returns:
+        Result dict
+    """
+    # Bouw de samenvatting
+    lines = []
+    for member, tasks in tasks_by_member.items():
+        if tasks:
+            lines.append(f"{member}: {', '.join(tasks)}")
+
+    if not lines:
+        return {"skipped": True, "reason": "Niemand heeft taken vandaag"}
+
+    title = "Goedemorgen! Taken vandaag:"
+    body = "\n".join(lines)
+
+    return send_summary_to_endpoint(endpoint, p256dh, auth, title, body, {"type": "morning_summary"})
+
+
+def send_evening_summary(open_tasks_by_member: dict[str, list[str]], endpoint: str, p256dh: str, auth: str) -> dict:
+    """Stuur avond samenvatting met openstaande taken voor iedereen.
+
+    Args:
+        open_tasks_by_member: Dict van {naam: [openstaande taken]}
+        endpoint: Push endpoint
+        p256dh: Public key
+        auth: Auth secret
+
+    Returns:
+        Result dict
+    """
+    # Bouw de samenvatting
+    lines = []
+    for member, tasks in open_tasks_by_member.items():
+        if tasks:
+            lines.append(f"{member}: {', '.join(tasks)}")
+
+    if not lines:
+        title = "Goed gedaan!"
+        body = "Alle taken zijn af vandaag!"
+    else:
+        title = "Nog te doen vandaag:"
+        body = "\n".join(lines)
+
+    return send_summary_to_endpoint(endpoint, p256dh, auth, title, body, {"type": "evening_summary"})

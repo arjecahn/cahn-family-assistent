@@ -205,9 +205,10 @@ class PushTestRequest(BaseModel):
 
 @app.post("/api/push/test")
 async def push_test(request: PushTestRequest):
-    """Stuur test notificaties naar een gezinslid (ochtend + avond)."""
-    from .database import today_local, get_completions_for_week
+    """Stuur test notificaties - samenvatting van alle taken."""
+    from .database import today_local, get_completions_for_week, get_all_push_subscriptions
     from .task_engine import engine
+    from .push_notifications import send_morning_summary, send_evening_summary
 
     today = today_local()
     week_number = today.isocalendar()[1]
@@ -217,14 +218,14 @@ async def push_test(request: PushTestRequest):
     # Haal het rooster
     schedule = engine.get_week_schedule()
 
-    # Verzamel taken voor vandaag
-    member_tasks = []
+    # Verzamel taken voor alle gezinsleden vandaag
+    tasks_by_member = {"Nora": [], "Linde": [], "Fenna": []}
     if day_name in schedule.get("schedule", {}):
         day_schedule = schedule["schedule"][day_name]
-        # Schedule structuur: {tasks: [{task_name, assigned_to, completed, ...}]}
         for task in day_schedule.get("tasks", []):
-            if task.get("assigned_to") == request.member_name:
-                member_tasks.append(task.get("task_name"))
+            member = task.get("assigned_to")
+            if member in tasks_by_member:
+                tasks_by_member[member].append(task.get("task_name"))
 
     # Verzamel openstaande taken (niet afgevinkt vandaag)
     completions = get_completions_for_week(week_number)
@@ -233,39 +234,39 @@ async def push_test(request: PushTestRequest):
         if c.completed_at.date() == today:
             completed_today.add((c.member_name, c.task_name))
 
-    open_tasks = []
-    for task in member_tasks:
-        if (request.member_name, task) not in completed_today:
-            open_tasks.append(task)
+    open_tasks_by_member = {"Nora": [], "Linde": [], "Fenna": []}
+    for member, tasks in tasks_by_member.items():
+        for task in tasks:
+            if (member, task) not in completed_today:
+                open_tasks_by_member[member].append(task)
 
-    results = {"morning": None, "evening": None}
+    # Haal unieke endpoints op (we sturen maar 1 notificatie per device)
+    all_subs = get_all_push_subscriptions()
+    unique_endpoints = {}
+    for sub in all_subs:
+        if sub.endpoint not in unique_endpoints:
+            unique_endpoints[sub.endpoint] = sub
 
-    # Stuur ochtend notificatie (altijd, ook als test)
-    if member_tasks:
-        results["morning"] = send_morning_reminder(request.member_name, member_tasks)
-    else:
-        # Stuur toch een test notificatie
-        results["morning"] = send_push_notification(
-            request.member_name,
-            f"Goedemorgen {request.member_name}!",
-            "Geen taken vandaag - lekker vrij!",
-            {"type": "morning_reminder"}
-        )
+    if not unique_endpoints:
+        return {"error": "Geen subscriptions gevonden", "morning": None, "evening": None}
 
-    # Stuur avond notificatie (na 2 sec delay zodat ze apart aankomen)
+    results = {"morning": {"success": 0, "failed": 0}, "evening": {"success": 0, "failed": 0}}
+
+    # Stuur ochtend samenvatting naar elk uniek device
+    for endpoint, sub in unique_endpoints.items():
+        result = send_morning_summary(tasks_by_member, sub.endpoint, sub.p256dh, sub.auth)
+        results["morning"]["success"] += result.get("success", 0)
+        results["morning"]["failed"] += result.get("failed", 0)
+
+    # Wacht even zodat notificaties apart aankomen
     import asyncio
     await asyncio.sleep(2)
 
-    if open_tasks:
-        results["evening"] = send_evening_reminder(request.member_name, open_tasks)
-    else:
-        # Stuur toch een test notificatie
-        results["evening"] = send_push_notification(
-            request.member_name,
-            f"Goed gedaan {request.member_name}!",
-            "Alle taken zijn af!" if member_tasks else "Geen taken vandaag",
-            {"type": "evening_reminder"}
-        )
+    # Stuur avond samenvatting naar elk uniek device
+    for endpoint, sub in unique_endpoints.items():
+        result = send_evening_summary(open_tasks_by_member, sub.endpoint, sub.p256dh, sub.auth)
+        results["evening"]["success"] += result.get("success", 0)
+        results["evening"]["failed"] += result.get("failed", 0)
 
     return results
 
@@ -283,66 +284,70 @@ async def push_status(member_name: str):
 
 @app.post("/api/push/morning-reminders")
 async def send_morning_reminders():
-    """Stuur ochtend herinneringen naar alle gezinsleden.
+    """Stuur ochtend samenvatting naar alle geregistreerde devices.
 
-    Dit endpoint kan worden aangeroepen door een externe cron job (bijv. Vercel Cron)
-    om 7:00 uur 's ochtends.
+    Dit endpoint wordt aangeroepen door Vercel Cron om 7:00 uur.
+    Stuurt 1 notificatie per device met een samenvatting van alle taken.
     """
-    from .database import today_local, get_all_members
+    from .database import today_local, get_all_push_subscriptions
     from .task_engine import engine
+    from .push_notifications import send_morning_summary
 
     today = today_local()
-    week_number = today.isocalendar()[1]
-    year = today.isocalendar()[0]
     day_of_week = today.weekday()
+    day_name = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"][day_of_week]
 
     # Haal het rooster voor vandaag
     schedule = engine.get_week_schedule()
-    members = get_all_members()
 
-    day_name = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"][day_of_week]
+    # Verzamel taken voor alle gezinsleden
+    tasks_by_member = {"Nora": [], "Linde": [], "Fenna": []}
+    if day_name in schedule.get("schedule", {}):
+        day_schedule = schedule["schedule"][day_name]
+        for task in day_schedule.get("tasks", []):
+            member = task.get("assigned_to")
+            if member in tasks_by_member:
+                tasks_by_member[member].append(task.get("task_name"))
 
-    results = {}
-    for member in members:
-        # Verzamel taken voor dit gezinslid vandaag
-        member_tasks = []
+    # Haal unieke endpoints op
+    all_subs = get_all_push_subscriptions()
+    unique_endpoints = {}
+    for sub in all_subs:
+        if sub.endpoint not in unique_endpoints:
+            unique_endpoints[sub.endpoint] = sub
 
-        if day_name in schedule.get("schedule", {}):
-            day_schedule = schedule["schedule"][day_name]
-            # Schedule structuur: {tasks: [{task_name, assigned_to, completed, ...}]}
-            for task in day_schedule.get("tasks", []):
-                if task.get("assigned_to") == member.name:
-                    member_tasks.append(task.get("task_name"))
+    if not unique_endpoints:
+        return {"status": "skipped", "reason": "Geen subscriptions gevonden"}
 
-        # Stuur notificatie als er taken zijn
-        if member_tasks:
-            result = send_morning_reminder(member.name, member_tasks)
-            results[member.name] = result
-        else:
-            results[member.name] = {"skipped": True, "reason": "Geen taken vandaag"}
+    # Stuur samenvatting naar elk uniek device
+    results = {"success": 0, "failed": 0, "devices": len(unique_endpoints)}
+    for endpoint, sub in unique_endpoints.items():
+        result = send_morning_summary(tasks_by_member, sub.endpoint, sub.p256dh, sub.auth)
+        results["success"] += result.get("success", 0)
+        results["failed"] += result.get("failed", 0)
 
-    return {"results": results}
+    return {"status": "ok", "results": results}
 
 
 @app.post("/api/push/evening-reminders")
 async def send_evening_reminders():
-    """Stuur avond herinneringen voor openstaande taken.
+    """Stuur avond samenvatting naar alle geregistreerde devices.
 
-    Dit endpoint kan worden aangeroepen door een externe cron job (bijv. Vercel Cron)
-    om 18:00 uur.
+    Dit endpoint wordt aangeroepen door Vercel Cron om 18:00 uur.
+    Stuurt 1 notificatie per device met openstaande taken.
     """
-    from .database import today_local, get_all_members, get_completions_for_week
+    from .database import today_local, get_completions_for_week, get_all_push_subscriptions
     from .task_engine import engine
+    from .push_notifications import send_evening_summary
 
     today = today_local()
     week_number = today.isocalendar()[1]
-    year = today.isocalendar()[0]
     day_of_week = today.weekday()
+    day_name = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"][day_of_week]
 
-    # Haal het rooster en completions voor vandaag
+    # Haal het rooster en completions
     schedule = engine.get_week_schedule()
     completions = get_completions_for_week(week_number)
-    members = get_all_members()
 
     # Maak set van voltooide taken vandaag
     completed_today = set()
@@ -350,30 +355,39 @@ async def send_evening_reminders():
         if c.completed_at.date() == today:
             completed_today.add((c.member_name, c.task_name))
 
-    day_name = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"][day_of_week]
+    # Verzamel taken en openstaande taken voor alle gezinsleden
+    tasks_by_member = {"Nora": [], "Linde": [], "Fenna": []}
+    if day_name in schedule.get("schedule", {}):
+        day_schedule = schedule["schedule"][day_name]
+        for task in day_schedule.get("tasks", []):
+            member = task.get("assigned_to")
+            if member in tasks_by_member:
+                tasks_by_member[member].append(task.get("task_name"))
 
-    results = {}
-    for member in members:
-        # Verzamel openstaande taken voor dit gezinslid vandaag
-        open_tasks = []
+    open_tasks_by_member = {"Nora": [], "Linde": [], "Fenna": []}
+    for member, tasks in tasks_by_member.items():
+        for task in tasks:
+            if (member, task) not in completed_today:
+                open_tasks_by_member[member].append(task)
 
-        if day_name in schedule.get("schedule", {}):
-            day_schedule = schedule["schedule"][day_name]
-            # Schedule structuur: {tasks: [{task_name, assigned_to, completed, ...}]}
-            for task in day_schedule.get("tasks", []):
-                if task.get("assigned_to") == member.name:
-                    task_name = task.get("task_name")
-                    if (member.name, task_name) not in completed_today:
-                        open_tasks.append(task_name)
+    # Haal unieke endpoints op
+    all_subs = get_all_push_subscriptions()
+    unique_endpoints = {}
+    for sub in all_subs:
+        if sub.endpoint not in unique_endpoints:
+            unique_endpoints[sub.endpoint] = sub
 
-        # Stuur notificatie als er openstaande taken zijn
-        if open_tasks:
-            result = send_evening_reminder(member.name, open_tasks)
-            results[member.name] = result
-        else:
-            results[member.name] = {"skipped": True, "reason": "Alle taken gedaan!"}
+    if not unique_endpoints:
+        return {"status": "skipped", "reason": "Geen subscriptions gevonden"}
 
-    return {"results": results}
+    # Stuur samenvatting naar elk uniek device
+    results = {"success": 0, "failed": 0, "devices": len(unique_endpoints)}
+    for endpoint, sub in unique_endpoints.items():
+        result = send_evening_summary(open_tasks_by_member, sub.endpoint, sub.p256dh, sub.auth)
+        results["success"] += result.get("success", 0)
+        results["failed"] += result.get("failed", 0)
+
+    return {"status": "ok", "results": results}
 
 
 @app.get("/api/members")
