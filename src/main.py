@@ -4633,7 +4633,7 @@ async def tasks_pwa():
                 return;
             }
 
-            container.style.display = 'block';
+            const today = new Date().toDateString();
             const dayNames = ['zondag', 'maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag'];
             let html = '';
 
@@ -4642,7 +4642,10 @@ async def tasks_pwa():
                 const dayName = dayNames[prefDate.getDay()];
 
                 if (t.completed_by) {
-                    // Voltooide taak - toon met vinkje en unclaim optie
+                    // Voltooide taak - alleen tonen als vandaag voltooid
+                    const completedDate = new Date(t.completed_at).toDateString();
+                    if (completedDate !== today) return; // Skip als niet vandaag voltooid
+
                     html += '<div class="bonus-task-item completed" data-bonus-id="' + t.id + '">';
                     html += '<div class="task-check" onclick="unclaimBonusTask(' + t.id + ', event)">✓</div>';
                     html += '<div class="bonus-task-info">';
@@ -4662,6 +4665,13 @@ async def tasks_pwa():
                 }
             });
 
+            // Verberg sectie als er geen zichtbare taken zijn
+            if (!html) {
+                container.style.display = 'none';
+                return;
+            }
+
+            container.style.display = 'block';
             list.innerHTML = html;
         }
 
