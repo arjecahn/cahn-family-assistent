@@ -2496,6 +2496,15 @@ async def tasks_pwa():
                         <small>Tip: Installeer de app op je homescreen (iOS 16.4+)</small>
                     </span>
                 </div>
+                <div class="form-group" id="pushMemberSelect">
+                    <label>Voor wie zijn deze notificaties?</label>
+                    <select id="pushMember" style="font-size:16px;">
+                        <option value="all">Iedereen (Nora, Linde & Fenna)</option>
+                        <option value="Nora">Alleen Nora</option>
+                        <option value="Linde">Alleen Linde</option>
+                        <option value="Fenna">Alleen Fenna</option>
+                    </select>
+                </div>
                 <div id="pushStatus" style="margin-bottom:12px;font-size:14px;"></div>
                 <div style="display:flex;flex-direction:column;gap:10px;">
                     <button class="submit-btn" id="enablePushBtn" onclick="enablePushNotifications()" style="background:#22c55e;">
@@ -4601,11 +4610,14 @@ async def tasks_pwa():
             const enableBtn = document.getElementById('enablePushBtn');
             const disableBtn = document.getElementById('disablePushBtn');
             const testBtn = document.getElementById('testPushBtn');
+            const memberSelect = document.getElementById('pushMember');
+            const memberSelectDiv = document.getElementById('pushMemberSelect');
 
             // Check of push ondersteund wordt
             if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
                 notSupportedEl.style.display = 'block';
                 enableBtn.style.display = 'none';
+                memberSelectDiv.style.display = 'none';
                 return;
             }
 
@@ -4615,6 +4627,7 @@ async def tasks_pwa():
 
             if (!isStandalone) {
                 statusEl.innerHTML = '<span style="color:#f59e0b;">📱 Installeer eerst de app op je homescreen voor notificaties</span>';
+                memberSelectDiv.style.display = 'none';
                 return;
             }
 
@@ -4627,6 +4640,7 @@ async def tasks_pwa():
                 if (!keyRes.ok) {
                     statusEl.innerHTML = '<span style="color:#ef4444;">Push niet geconfigureerd op server</span>';
                     enableBtn.style.display = 'none';
+                    memberSelectDiv.style.display = 'none';
                     return;
                 }
                 const keyData = await keyRes.json();
@@ -4634,39 +4648,42 @@ async def tasks_pwa():
 
                 // Check huidige subscription status
                 const subscription = await swRegistration.pushManager.getSubscription();
-                updatePushUI(subscription !== null);
+                const savedPushMembers = localStorage.getItem('pushMembers');
+                updatePushUI(subscription !== null, savedPushMembers);
             } catch (e) {
                 console.error('Push init error:', e);
                 statusEl.innerHTML = '<span style="color:#ef4444;">Fout bij initialisatie</span>';
             }
         }
 
-        function updatePushUI(isSubscribed) {
+        function updatePushUI(isSubscribed, memberNames) {
             const statusEl = document.getElementById('pushStatus');
             const enableBtn = document.getElementById('enablePushBtn');
             const disableBtn = document.getElementById('disablePushBtn');
             const testBtn = document.getElementById('testPushBtn');
+            const memberSelect = document.getElementById('pushMember');
 
-            if (isSubscribed) {
-                statusEl.innerHTML = '<span style="color:#22c55e;">✅ Notificaties zijn ingeschakeld voor ' + currentMember + '</span>';
+            if (isSubscribed && memberNames) {
+                const displayNames = memberNames === 'all' ? 'Nora, Linde & Fenna' : memberNames;
+                statusEl.innerHTML = '<span style="color:#22c55e;">✅ Notificaties aan voor: <strong>' + displayNames + '</strong></span>';
                 enableBtn.style.display = 'none';
                 disableBtn.style.display = 'block';
                 testBtn.style.display = 'block';
+                memberSelect.disabled = true;
+                memberSelect.value = memberNames;
             } else {
                 statusEl.innerHTML = '<span style="color:#64748b;">Notificaties zijn uitgeschakeld</span>';
                 enableBtn.style.display = 'block';
                 disableBtn.style.display = 'none';
                 testBtn.style.display = 'none';
+                memberSelect.disabled = false;
             }
         }
 
         async function enablePushNotifications() {
             const resultEl = document.getElementById('pushResult');
-
-            if (!currentMember) {
-                resultEl.innerHTML = '<span style="color:#ef4444;">Selecteer eerst wie je bent (Vandaag tab)</span>';
-                return;
-            }
+            const memberSelect = document.getElementById('pushMember');
+            const selectedMember = memberSelect.value;
 
             try {
                 resultEl.innerHTML = '<span style="color:#64748b;">Toestemming vragen...</span>';
@@ -4686,22 +4703,33 @@ async def tasks_pwa():
                     applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
                 });
 
-                // Stuur subscription naar server
                 const subJson = subscription.toJSON();
-                const res = await fetch('/api/push/subscribe', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        member_name: currentMember,
-                        endpoint: subJson.endpoint,
-                        p256dh: subJson.keys.p256dh,
-                        auth: subJson.keys.auth
-                    })
-                });
 
-                if (res.ok) {
+                // Bepaal voor welke members we subscriben
+                const members = selectedMember === 'all'
+                    ? ['Nora', 'Linde', 'Fenna']
+                    : [selectedMember];
+
+                // Stuur subscription naar server voor elke member
+                let successCount = 0;
+                for (const member of members) {
+                    const res = await fetch('/api/push/subscribe', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            member_name: member,
+                            endpoint: subJson.endpoint,
+                            p256dh: subJson.keys.p256dh,
+                            auth: subJson.keys.auth
+                        })
+                    });
+                    if (res.ok) successCount++;
+                }
+
+                if (successCount > 0) {
+                    localStorage.setItem('pushMembers', selectedMember);
                     resultEl.innerHTML = '<span style="color:#22c55e;">✅ Notificaties ingeschakeld!</span>';
-                    updatePushUI(true);
+                    updatePushUI(true, selectedMember);
                 } else {
                     throw new Error('Server error');
                 }
@@ -4730,8 +4758,9 @@ async def tasks_pwa():
                     });
                 }
 
+                localStorage.removeItem('pushMembers');
                 resultEl.innerHTML = '<span style="color:#22c55e;">Notificaties uitgeschakeld</span>';
-                updatePushUI(false);
+                updatePushUI(false, null);
             } catch (e) {
                 console.error('Push unsubscribe error:', e);
                 resultEl.innerHTML = '<span style="color:#ef4444;">Fout bij uitschakelen</span>';
@@ -4742,46 +4771,47 @@ async def tasks_pwa():
 
         async function testPushNotification() {
             const resultEl = document.getElementById('pushResult');
+            const savedPushMembers = localStorage.getItem('pushMembers');
 
-            if (!currentMember) {
-                resultEl.innerHTML = '<span style="color:#ef4444;">Selecteer eerst wie je bent</span>';
+            if (!savedPushMembers) {
+                resultEl.innerHTML = '<span style="color:#ef4444;">Notificaties zijn niet ingeschakeld</span>';
                 return;
             }
+
+            // Bepaal welke member(s) we testen
+            const testMembers = savedPushMembers === 'all'
+                ? ['Nora', 'Linde', 'Fenna']
+                : [savedPushMembers];
 
             try {
                 resultEl.innerHTML = '<span style="color:#64748b;">Test versturen... (even geduld)</span>';
 
-                const res = await fetch('/api/push/test', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ member_name: currentMember })
-                });
+                let totalSuccess = 0;
+                let lastData = null;
 
-                console.log('Push test response status:', res.status);
+                for (const member of testMembers) {
+                    const res = await fetch('/api/push/test', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ member_name: member })
+                    });
 
-                if (!res.ok) {
-                    const errorText = await res.text();
-                    console.error('Push test error:', errorText);
-                    resultEl.innerHTML = '<span style="color:#ef4444;">Server error: ' + res.status + '</span>';
-                    return;
+                    if (res.ok) {
+                        const data = await res.json();
+                        lastData = data;
+                        totalSuccess += (data.morning?.success || 0) + (data.evening?.success || 0);
+                    }
                 }
 
-                const data = await res.json();
-                console.log('Push test data:', data);
-
-                // Check resultaten van morning en evening
-                const morningSent = data.morning && data.morning.success > 0;
-                const eveningSent = data.evening && data.evening.success > 0;
+                console.log('Push test total success:', totalSuccess);
 
                 let msg = '';
-                if (morningSent || eveningSent) {
-                    const count = (data.morning?.success || 0) + (data.evening?.success || 0);
-                    msg = '<span style="color:#22c55e;">✅ ' + count + ' notificatie(s) verstuurd!</span>';
-                } else if (data.morning?.error || data.evening?.error) {
-                    // VAPID keys niet geconfigureerd of andere server error
-                    msg = '<span style="color:#ef4444;">' + (data.morning?.error || data.evening?.error) + '</span>';
+                if (totalSuccess > 0) {
+                    msg = '<span style="color:#22c55e;">✅ ' + totalSuccess + ' notificatie(s) verstuurd!</span>';
+                } else if (lastData?.morning?.error || lastData?.evening?.error) {
+                    msg = '<span style="color:#ef4444;">' + (lastData.morning?.error || lastData.evening?.error) + '</span>';
                 } else {
-                    msg = '<span style="color:#ef4444;">Geen subscription gevonden. Schakel notificaties opnieuw in.</span>';
+                    msg = '<span style="color:#ef4444;">Kon niet versturen. Probeer opnieuw in te schakelen.</span>';
                 }
                 resultEl.innerHTML = msg;
             } catch (e) {
