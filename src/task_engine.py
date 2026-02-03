@@ -1696,7 +1696,7 @@ class TaskEngine:
         member_day_slots = {day_idx: {m.name: set() for m in members} for day_idx in range(7)}
 
         # Bepaal voor elke taak op welke dagen deze moet worden gedaan
-        task_days = self._distribute_tasks_over_week(tasks, day_availability)
+        task_days = self._distribute_tasks_over_week(tasks, day_availability, custom_rules)
 
         for day_idx in range(7):
             day_name = DAY_NAMES[day_idx]
@@ -1916,6 +1916,37 @@ class TaskEngine:
 
         return False
 
+    def _is_skip_day(self, task_name: str, day_of_week: int, custom_rules: list) -> bool:
+        """Check of een taak wordt overgeslagen op deze dag (skip_day rule).
+
+        Skip_day rules zijn bedoeld voor situaties waar de taak niet door de kinderen
+        hoeft te worden gedaan, bijv. op dagen dat de schoonmakers komen.
+
+        Een skip_day rule matcht wanneer:
+        - rule_type == "skip_day"
+        - member_name is None (geldt voor iedereen)
+        - task_name matcht OF rule.task_name is None
+        - day_of_week matcht
+        """
+        for rule in custom_rules:
+            if rule.rule_type != "skip_day":
+                continue
+
+            # Skip_day rules moeten member_name=None hebben (geldt voor iedereen)
+            if rule.member_name is not None:
+                continue
+
+            # Check of taak matcht (None = alle taken)
+            task_matches = rule.task_name is None or rule.task_name == task_name
+
+            # Check of dag matcht (moet specifiek zijn voor skip_day)
+            day_matches = rule.day_of_week == day_of_week
+
+            if task_matches and day_matches:
+                return True
+
+        return False
+
     def _count_member_tasks(self, schedule: dict, members: list) -> dict:
         """Tel hoeveel taken per lid deze week.
 
@@ -1942,7 +1973,8 @@ class TaskEngine:
                     counts[name] += 1
         return counts
 
-    def _distribute_tasks_over_week(self, tasks: list, day_availability: dict) -> dict:
+    def _distribute_tasks_over_week(self, tasks: list, day_availability: dict,
+                                      custom_rules: list = None) -> dict:
         """
         Verdeel taken flexibel over de week.
 
@@ -1952,9 +1984,11 @@ class TaskEngine:
         - Spreiding over de week voor afwisseling
         - Taken met lagere targets worden verspreid over verschillende dagen
         - Weekday-only taken (uitruimen_ochtend) alleen ma-vr
+        - Skip_day rules: taak wordt overgeslagen op bepaalde dagen (bijv. schoonmaakdagen)
         - Spacing rules voor karton/glas (minstens X dagen ertussen)
         - BALANCERING: taken worden zo gelijk mogelijk verdeeld over dagen
         """
+        custom_rules = custom_rules or []
         task_days = {}
 
         # Sorteer taken op target (hoogste eerst), zodat dagelijkse taken eerst komen
@@ -1984,6 +2018,10 @@ class TaskEngine:
                 if task.name in WEEKDAY_ONLY_TASKS:
                     if day_idx >= 5:  # Weekend (zaterdag=5, zondag=6)
                         continue
+
+                # Check skip_day rules (bijv. schoonmaakdagen)
+                if self._is_skip_day(task.name, day_idx, custom_rules):
+                    continue
 
                 # Check max taken per dag limiet
                 if day_task_count[day_idx] >= MAX_TASKS_PER_DAY:

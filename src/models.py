@@ -96,14 +96,16 @@ class CustomRule(BaseModel):
     Voorbeelden:
     - "Nora kan op donderdag nooit het glas wegbrengen"
     - "Linde mag nooit uitruimen ochtend"
+    - "Uitruimen ochtend wordt overgeslagen op dinsdag (schoonmakers)"
 
     rule_type:
     - "unavailable": lid kan deze taak niet op deze dag
     - "never": lid kan deze taak nooit (ongeacht dag)
+    - "skip_day": taak wordt overgeslagen op deze dag voor iedereen (bijv. schoonmaakdagen)
     - "prefer": lid heeft voorkeur voor deze taak (nog niet geïmplementeerd)
     """
     id: str
-    member_name: str
+    member_name: Optional[str] = None  # None = geldt voor iedereen (bijv. skip_day rules)
     task_name: Optional[str] = None  # None = alle taken
     day_of_week: Optional[int] = None  # None = alle dagen, 0=maandag, 6=zondag
     rule_type: str = "unavailable"
