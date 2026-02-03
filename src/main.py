@@ -5323,6 +5323,17 @@ async def tasks_pwa():
             const container = document.getElementById('rulesList');
             container.innerHTML = '<div class="loading">Laden...</div>';
 
+            // Mapping van interne task names naar display names
+            const taskDisplayNames = {
+                'uitruimen_ochtend': 'Uitruimen ochtend',
+                'uitruimen_avond': 'Uitruimen avond',
+                'inruimen': 'Inruimen',
+                'dekken': 'Dekken',
+                'karton': 'Karton en papier wegbrengen',
+                'glas': 'Glas wegbrengen',
+                'koken': 'Koken'
+            };
+
             try {
                 const res = await fetch(API + '/api/rules');
                 const data = await res.json();
@@ -5335,12 +5346,25 @@ async def tasks_pwa():
 
                 let html = '';
                 rules.forEach(r => {
-                    const task = r.task_name || 'alle taken';
+                    const taskRaw = r.task_name || 'alle taken';
+                    const task = taskDisplayNames[taskRaw] || taskRaw;
                     const day = r.day_of_week !== null ? dayNames[r.day_of_week] : 'elke dag';
+
+                    // Verschillende weergave voor skip_day rules vs normale rules
+                    let title;
+                    let emoji;
+                    if (r.rule_type === 'skip_day') {
+                        title = 'Overslaan: ' + task;
+                        emoji = '⏭️';
+                    } else {
+                        title = (r.member_name || 'Iedereen') + ' kan niet: ' + task;
+                        emoji = '🚫';
+                    }
+
                     html += '<div class="absence-item">' +
-                        '<span class="emoji">🚫</span>' +
+                        '<span class="emoji">' + emoji + '</span>' +
                         '<div class="details">' +
-                        '<div class="name">' + r.member_name + ' kan niet: ' + task + '</div>' +
+                        '<div class="name">' + title + '</div>' +
                         '<div class="dates">Op: ' + day + '</div>' +
                         (r.description ? '<div class="reason">' + r.description + '</div>' : '') +
                         '</div>' +
