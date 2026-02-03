@@ -115,7 +115,7 @@ PostgreSQL via Supabase met automatische URL parsing voor Vercel compatibility.
 | `/api/rules` | GET | Alle actieve custom rules |
 | `/api/rules` | POST | Nieuwe custom rule toevoegen |
 | `/api/rules/{id}` | DELETE | Verwijder custom rule |
-| `/api/rules/add-cleaning-days` | POST | Voeg schoonmaakdag regels toe (di/vr) |
+| `/api/rules/add-cleaning-days` | GET/POST | Voeg schoonmaakdag regels toe (di/vr) |
 
 ## Environment Variables
 
