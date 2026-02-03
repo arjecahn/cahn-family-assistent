@@ -82,6 +82,7 @@ PostgreSQL via Supabase met automatische URL parsing voor Vercel compatibility.
 - `swaps` - Ruil verzoeken
 - `push_subscriptions` - Push notification subscriptions per device
 - `bonus_tasks` - Eenmalige bonustaken van mama
+- `custom_rules` - Configureerbare regels (schoonmaakdagen, restricties)
 
 ### API Endpoints (`src/main.py`)
 
@@ -111,6 +112,10 @@ PostgreSQL via Supabase met automatische URL parsing voor Vercel compatibility.
 | `/api/bonus-tasks/{id}/complete` | POST | Claim bonustaak |
 | `/api/bonus-tasks/{id}/unclaim` | POST | Maak claim ongedaan |
 | `/api/bonus-tasks/{id}` | DELETE | Verwijder bonustaak |
+| `/api/rules` | GET | Alle actieve custom rules |
+| `/api/rules` | POST | Nieuwe custom rule toevoegen |
+| `/api/rules/{id}` | DELETE | Verwijder custom rule |
+| `/api/rules/add-cleaning-days` | POST | Voeg schoonmaakdag regels toe (di/vr) |
 
 ## Environment Variables
 
@@ -317,6 +322,30 @@ Bij het genereren van het weekrooster (`_generate_new_schedule`):
 - `member_month_task_counts` moet worden bijgewerkt NA elke toewijzing
 - Anders krijgt dezelfde persoon steeds dezelfde taak
 - Bij gelijke scores: gebruik `random.choice()` voor variatie
+
+### Custom Rules (Schoonmaakdagen)
+
+Het systeem ondersteunt configureerbare regels voor taakplanning via de `custom_rules` tabel.
+
+**Rule types:**
+- `unavailable`: Lid kan deze taak niet op deze dag
+- `never`: Lid kan deze taak nooit (ongeacht dag)
+- `skip_day`: Taak wordt overgeslagen op deze dag voor iedereen (bijv. schoonmaakdagen)
+
+**Schoonmaakdagen activeren:**
+Op dinsdag en vrijdag komen de schoonmakers. Zij doen dan het uitruimen van de afwasmachine. Om dit te activeren:
+```bash
+curl -X POST https://cahn-family-assistent.vercel.app/api/rules/add-cleaning-days
+```
+
+Dit voegt twee `skip_day` regels toe zodat `uitruimen_ochtend` niet wordt ingepland op dinsdag en vrijdag.
+
+**Handmatig een skip_day regel toevoegen:**
+```bash
+curl -X POST https://cahn-family-assistent.vercel.app/api/rules \
+  -H "Content-Type: application/json" \
+  -d '{"task_name": "uitruimen_ochtend", "day_of_week": 1, "rule_type": "skip_day", "description": "Schoonmakers"}'
+```
 
 ### Swap Functionaliteit (WIP)
 Er is een `/api/swap/same-day` endpoint maar de UI is tijdelijk uitgeschakeld (commented out in main.py). Moet nog getest/verbeterd worden.

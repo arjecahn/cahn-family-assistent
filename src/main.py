@@ -870,10 +870,10 @@ async def delete_absence(absence_id: str):
 # === Custom Rules Endpoints ===
 
 class CustomRuleRequest(BaseModel):
-    member_name: str
+    member_name: Optional[str] = None  # None voor skip_day rules (geldt voor iedereen)
     task_name: Optional[str] = None
     day_of_week: Optional[int] = None  # 0=maandag, 6=zondag
-    rule_type: str = "unavailable"  # unavailable, never
+    rule_type: str = "unavailable"  # unavailable, never, skip_day
     description: Optional[str] = None
 
 
@@ -908,9 +908,13 @@ async def add_rule(request: CustomRuleRequest):
         "rule_type": request.rule_type,
         "description": request.description
     })
+    if request.rule_type == "skip_day":
+        message = f"Skip-dag regel toegevoegd voor {request.task_name or 'alle taken'}"
+    else:
+        message = f"Regel toegevoegd voor {request.member_name}"
     return {
         "success": True,
-        "message": f"Regel toegevoegd voor {request.member_name}",
+        "message": message,
         "rule": {
             "id": rule.id,
             "member_name": rule.member_name,
@@ -930,6 +934,65 @@ async def delete_rule(rule_id: str):
     if not deleted:
         raise HTTPException(status_code=404, detail="Regel niet gevonden")
     return {"success": True, "message": "Regel verwijderd"}
+
+
+@app.post("/api/rules/add-cleaning-days")
+async def add_cleaning_day_rules():
+    """Voeg skip_day regels toe voor schoonmaakdagen (dinsdag en vrijdag).
+
+    Op deze dagen doen de schoonmakers het uitruimen van de afwasmachine,
+    dus de kinderen hoeven dit niet te doen.
+    """
+    from .database import add_custom_rule, get_all_custom_rules
+
+    # Check of de regels al bestaan
+    existing_rules = get_all_custom_rules()
+    existing_skip_days = [
+        (r.task_name, r.day_of_week)
+        for r in existing_rules
+        if r.rule_type == "skip_day"
+    ]
+
+    added_rules = []
+    skipped = []
+
+    # Dinsdag = 1, Vrijdag = 4
+    cleaning_days = [
+        (1, "dinsdag"),
+        (4, "vrijdag")
+    ]
+
+    for day_idx, day_name in cleaning_days:
+        if ("uitruimen_ochtend", day_idx) in existing_skip_days:
+            skipped.append(day_name)
+            continue
+
+        rule = add_custom_rule({
+            "member_name": None,
+            "task_name": "uitruimen_ochtend",
+            "day_of_week": day_idx,
+            "rule_type": "skip_day",
+            "description": f"Schoonmakers doen dit op {day_name}"
+        })
+        added_rules.append({
+            "id": rule.id,
+            "day": day_name,
+            "task": "uitruimen_ochtend"
+        })
+
+    message = ""
+    if added_rules:
+        days = ", ".join(r["day"] for r in added_rules)
+        message = f"Schoonmaakdag regels toegevoegd voor {days}. "
+    if skipped:
+        message += f"Al bestaand voor: {', '.join(skipped)}."
+
+    return {
+        "success": True,
+        "message": message.strip() or "Geen nieuwe regels nodig",
+        "added_rules": added_rules,
+        "skipped": skipped
+    }
 
 
 @app.post("/api/schedule/regenerate")

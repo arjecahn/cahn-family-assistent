@@ -160,10 +160,11 @@ def init_db():
 
     # Custom rules - configureerbare restricties voor planning
     # Bijv: "Nora kan op donderdag nooit het glas wegbrengen"
+    # Of: "Uitruimen ochtend wordt overgeslagen op dinsdag (schoonmakers)"
     cur.execute("""
         CREATE TABLE IF NOT EXISTS custom_rules (
             id SERIAL PRIMARY KEY,
-            member_name VARCHAR(50) NOT NULL,
+            member_name VARCHAR(50),
             task_name VARCHAR(100),
             day_of_week INTEGER,
             rule_type VARCHAR(50) NOT NULL DEFAULT 'unavailable',
@@ -171,6 +172,11 @@ def init_db():
             active BOOLEAN DEFAULT TRUE,
             created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         )
+    """)
+
+    # Maak member_name nullable voor skip_day rules (migratie voor bestaande databases)
+    cur.execute("""
+        ALTER TABLE custom_rules ALTER COLUMN member_name DROP NOT NULL
     """)
 
     # Extra task assignments - handmatig toegevoegde taken (bijv. "ik ga vrijdag koken")
