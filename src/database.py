@@ -1742,23 +1742,28 @@ def get_missed_tasks_for_member(member_id: str, limit: int = 20) -> list[MissedT
 
 # CRUD operaties voor Push Subscriptions
 def add_push_subscription(member_name: str, endpoint: str, p256dh: str, auth: str) -> PushSubscription:
-    """Voeg een push subscription toe of update bestaande."""
+    """Voeg een push subscription toe of update bestaande.
+
+    Ondersteunt zowel specifieke members (Nora, Linde, Fenna) als "Gezamenlijk"
+    voor familie-brede notificaties.
+    """
     conn = get_db()
     cur = conn.cursor()
 
-    # Haal member_id op
+    # Haal member_id op (None voor "Gezamenlijk")
     cur.execute("SELECT id FROM members WHERE LOWER(name) = LOWER(%s)", (member_name,))
     member_row = cur.fetchone()
     member_id = member_row["id"] if member_row else None
 
     try:
-        # Upsert: als endpoint al bestaat voor deze member, update de keys
+        # Verwijder eerst eventuele bestaande subscription voor dit endpoint
+        # (voorkomt duplicates bij wisselen tussen Gezamenlijk en specifieke member)
+        cur.execute("DELETE FROM push_subscriptions WHERE endpoint = %s", (endpoint,))
+
+        # Insert nieuwe subscription
         cur.execute("""
             INSERT INTO push_subscriptions (member_id, member_name, endpoint, p256dh, auth)
             VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (member_id, endpoint) DO UPDATE SET
-                p256dh = EXCLUDED.p256dh,
-                auth = EXCLUDED.auth
             RETURNING id, created_at
         """, (member_id, member_name, endpoint, p256dh, auth))
         result = cur.fetchone()
