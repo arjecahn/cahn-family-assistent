@@ -936,7 +936,8 @@ async def delete_rule(rule_id: str):
     return {"success": True, "message": "Regel verwijderd"}
 
 
-@app.api_route("/api/rules/add-cleaning-days", methods=["GET", "POST"])
+@app.get("/api/rules/add-cleaning-days")
+@app.post("/api/rules/add-cleaning-days")
 async def add_cleaning_day_rules():
     """Voeg skip_day regels toe voor schoonmaakdagen (dinsdag en vrijdag).
 
