@@ -205,10 +205,14 @@ class PushTestRequest(BaseModel):
 
 @app.post("/api/push/test")
 async def push_test(request: PushTestRequest):
-    """Stuur test notificaties - samenvatting van alle taken."""
+    """Stuur test notificaties - gefilterd op de subscription's member_name.
+
+    - "Gezamenlijk" → samenvatting van iedereen
+    - Specifieke naam → alleen taken van die persoon
+    """
     from .database import today_local, get_completions_for_week, get_all_push_subscriptions
     from .task_engine import engine
-    from .push_notifications import send_morning_summary, send_evening_summary
+    from .push_notifications import send_morning_summary, send_evening_summary, send_summary_to_endpoint
 
     today = today_local()
     week_number = today.isocalendar()[1]
@@ -240,21 +244,32 @@ async def push_test(request: PushTestRequest):
             if (member, task) not in completed_today:
                 open_tasks_by_member[member].append(task)
 
-    # Haal unieke endpoints op (we sturen maar 1 notificatie per device)
+    # Haal alle subscriptions op
     all_subs = get_all_push_subscriptions()
-    unique_endpoints = {}
-    for sub in all_subs:
-        if sub.endpoint not in unique_endpoints:
-            unique_endpoints[sub.endpoint] = sub
 
-    if not unique_endpoints:
+    if not all_subs:
         return {"error": "Geen subscriptions gevonden", "morning": None, "evening": None}
 
     results = {"morning": {"success": 0, "failed": 0}, "evening": {"success": 0, "failed": 0}}
 
-    # Stuur ochtend samenvatting naar elk uniek device
-    for endpoint, sub in unique_endpoints.items():
-        result = send_morning_summary(tasks_by_member, sub.endpoint, sub.p256dh, sub.auth)
+    # Stuur test notificaties per subscription, gefilterd op member_name
+    for sub in all_subs:
+        if sub.member_name == "Gezamenlijk":
+            # Samenvatting van iedereen
+            result = send_morning_summary(tasks_by_member, sub.endpoint, sub.p256dh, sub.auth)
+        else:
+            # Alleen taken van specifieke persoon
+            member_tasks = tasks_by_member.get(sub.member_name, [])
+            if member_tasks:
+                title = f"[TEST] Goedemorgen {sub.member_name}!"
+                body = f"Vandaag: {', '.join(member_tasks)}"
+            else:
+                title = f"[TEST] Goedemorgen {sub.member_name}!"
+                body = "Geen taken vandaag!"
+            result = send_summary_to_endpoint(
+                sub.endpoint, sub.p256dh, sub.auth,
+                title, body, {"type": "test_morning"}
+            )
         results["morning"]["success"] += result.get("success", 0)
         results["morning"]["failed"] += result.get("failed", 0)
 
@@ -262,9 +277,22 @@ async def push_test(request: PushTestRequest):
     import asyncio
     await asyncio.sleep(2)
 
-    # Stuur avond samenvatting naar elk uniek device
-    for endpoint, sub in unique_endpoints.items():
-        result = send_evening_summary(open_tasks_by_member, sub.endpoint, sub.p256dh, sub.auth)
+    # Stuur avond test notificaties
+    for sub in all_subs:
+        if sub.member_name == "Gezamenlijk":
+            result = send_evening_summary(open_tasks_by_member, sub.endpoint, sub.p256dh, sub.auth)
+        else:
+            member_open = open_tasks_by_member.get(sub.member_name, [])
+            if member_open:
+                title = f"[TEST] Nog te doen, {sub.member_name}!"
+                body = f"Nog open: {', '.join(member_open)}"
+            else:
+                title = f"[TEST] Goed gedaan {sub.member_name}!"
+                body = "Al je taken zijn af vandaag!"
+            result = send_summary_to_endpoint(
+                sub.endpoint, sub.p256dh, sub.auth,
+                title, body, {"type": "test_evening"}
+            )
         results["evening"]["success"] += result.get("success", 0)
         results["evening"]["failed"] += result.get("failed", 0)
 
@@ -284,14 +312,16 @@ async def push_status(member_name: str):
 
 @app.post("/api/push/morning-reminders")
 async def send_morning_reminders():
-    """Stuur ochtend samenvatting naar alle geregistreerde devices.
+    """Stuur ochtend herinneringen naar alle geregistreerde devices.
 
     Dit endpoint wordt aangeroepen door Vercel Cron om 7:00 uur.
-    Stuurt 1 notificatie per device met een samenvatting van alle taken.
+    Per subscription:
+    - "Gezamenlijk" → samenvatting van iedereen
+    - Specifieke naam → alleen taken van die persoon
     """
     from .database import today_local, get_all_push_subscriptions
     from .task_engine import engine
-    from .push_notifications import send_morning_summary
+    from .push_notifications import send_morning_summary, send_summary_to_endpoint
 
     today = today_local()
     day_of_week = today.weekday()
@@ -309,20 +339,32 @@ async def send_morning_reminders():
             if member in tasks_by_member:
                 tasks_by_member[member].append(task.get("task_name"))
 
-    # Haal unieke endpoints op
+    # Haal alle subscriptions op
     all_subs = get_all_push_subscriptions()
-    unique_endpoints = {}
-    for sub in all_subs:
-        if sub.endpoint not in unique_endpoints:
-            unique_endpoints[sub.endpoint] = sub
 
-    if not unique_endpoints:
+    if not all_subs:
         return {"status": "skipped", "reason": "Geen subscriptions gevonden"}
 
-    # Stuur samenvatting naar elk uniek device
-    results = {"success": 0, "failed": 0, "devices": len(unique_endpoints)}
-    for endpoint, sub in unique_endpoints.items():
-        result = send_morning_summary(tasks_by_member, sub.endpoint, sub.p256dh, sub.auth)
+    # Stuur notificatie per subscription, gefilterd op member_name
+    results = {"success": 0, "failed": 0, "skipped": 0, "devices": len(all_subs)}
+    for sub in all_subs:
+        if sub.member_name == "Gezamenlijk":
+            # Stuur samenvatting van iedereen
+            result = send_morning_summary(tasks_by_member, sub.endpoint, sub.p256dh, sub.auth)
+        else:
+            # Stuur alleen taken van deze specifieke persoon
+            member_tasks = tasks_by_member.get(sub.member_name, [])
+            if not member_tasks:
+                results["skipped"] += 1
+                continue
+
+            title = f"Goedemorgen {sub.member_name}!"
+            body = f"Vandaag: {', '.join(member_tasks)}"
+            result = send_summary_to_endpoint(
+                sub.endpoint, sub.p256dh, sub.auth,
+                title, body, {"type": "morning_reminder"}
+            )
+
         results["success"] += result.get("success", 0)
         results["failed"] += result.get("failed", 0)
 
@@ -331,14 +373,16 @@ async def send_morning_reminders():
 
 @app.post("/api/push/evening-reminders")
 async def send_evening_reminders():
-    """Stuur avond samenvatting naar alle geregistreerde devices.
+    """Stuur avond herinneringen naar alle geregistreerde devices.
 
     Dit endpoint wordt aangeroepen door Vercel Cron om 18:00 uur.
-    Stuurt 1 notificatie per device met openstaande taken.
+    Per subscription:
+    - "Gezamenlijk" → samenvatting van openstaande taken van iedereen
+    - Specifieke naam → alleen openstaande taken van die persoon
     """
     from .database import today_local, get_completions_for_week, get_all_push_subscriptions
     from .task_engine import engine
-    from .push_notifications import send_evening_summary
+    from .push_notifications import send_evening_summary, send_summary_to_endpoint
 
     today = today_local()
     week_number = today.isocalendar()[1]
@@ -370,20 +414,34 @@ async def send_evening_reminders():
             if (member, task) not in completed_today:
                 open_tasks_by_member[member].append(task)
 
-    # Haal unieke endpoints op
+    # Haal alle subscriptions op
     all_subs = get_all_push_subscriptions()
-    unique_endpoints = {}
-    for sub in all_subs:
-        if sub.endpoint not in unique_endpoints:
-            unique_endpoints[sub.endpoint] = sub
 
-    if not unique_endpoints:
+    if not all_subs:
         return {"status": "skipped", "reason": "Geen subscriptions gevonden"}
 
-    # Stuur samenvatting naar elk uniek device
-    results = {"success": 0, "failed": 0, "devices": len(unique_endpoints)}
-    for endpoint, sub in unique_endpoints.items():
-        result = send_evening_summary(open_tasks_by_member, sub.endpoint, sub.p256dh, sub.auth)
+    # Stuur notificatie per subscription, gefilterd op member_name
+    results = {"success": 0, "failed": 0, "skipped": 0, "devices": len(all_subs)}
+    for sub in all_subs:
+        if sub.member_name == "Gezamenlijk":
+            # Stuur samenvatting van openstaande taken van iedereen
+            result = send_evening_summary(open_tasks_by_member, sub.endpoint, sub.p256dh, sub.auth)
+        else:
+            # Stuur alleen openstaande taken van deze specifieke persoon
+            member_open_tasks = open_tasks_by_member.get(sub.member_name, [])
+            if not member_open_tasks:
+                # Geen openstaande taken = alles gedaan!
+                title = f"Goed gedaan {sub.member_name}!"
+                body = "Al je taken zijn af vandaag!"
+            else:
+                title = f"Nog te doen, {sub.member_name}!"
+                body = f"Nog open: {', '.join(member_open_tasks)}"
+
+            result = send_summary_to_endpoint(
+                sub.endpoint, sub.p256dh, sub.auth,
+                title, body, {"type": "evening_reminder"}
+            )
+
         results["success"] += result.get("success", 0)
         results["failed"] += result.get("failed", 0)
 
@@ -5603,28 +5661,22 @@ async def tasks_pwa():
 
                 const subJson = subscription.toJSON();
 
-                // Bepaal voor welke members we subscriben
-                const members = selectedMember === 'all'
-                    ? ['Nora', 'Linde', 'Fenna']
-                    : [selectedMember];
+                // Bepaal member_name: "Gezamenlijk" voor iedereen, anders specifieke naam
+                const memberName = selectedMember === 'all' ? 'Gezamenlijk' : selectedMember;
 
-                // Stuur subscription naar server voor elke member
-                let successCount = 0;
-                for (const member of members) {
-                    const res = await fetch('/api/push/subscribe', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            member_name: member,
-                            endpoint: subJson.endpoint,
-                            p256dh: subJson.keys.p256dh,
-                            auth: subJson.keys.auth
-                        })
-                    });
-                    if (res.ok) successCount++;
-                }
+                // Stuur 1 subscription naar server
+                const res = await fetch('/api/push/subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        member_name: memberName,
+                        endpoint: subJson.endpoint,
+                        p256dh: subJson.keys.p256dh,
+                        auth: subJson.keys.auth
+                    })
+                });
 
-                if (successCount > 0) {
+                if (res.ok) {
                     localStorage.setItem('pushMembers', selectedMember);
                     resultEl.innerHTML = '<span style="color:#22c55e;">✅ Notificaties ingeschakeld!</span>';
                     updatePushUI(true, selectedMember);
