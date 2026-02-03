@@ -2836,15 +2836,16 @@ async def tasks_pwa():
                 </p>
 
                 <div class="form-group">
-                    <label>Wie?</label>
-                    <select id="ruleMember">
+                    <label>Voor wie?</label>
+                    <select id="ruleMember" onchange="updateRuleLabel()">
                         <option value="Nora">Nora</option>
                         <option value="Linde">Linde</option>
                         <option value="Fenna">Fenna</option>
+                        <option value="">── Iedereen (overslaan) ──</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>Kan niet:</label>
+                    <label id="ruleTaskLabel">Kan niet:</label>
                     <select id="ruleTask">
                         <option value="">Alle taken</option>
                     </select>
@@ -5378,6 +5379,16 @@ async def tasks_pwa():
             }
         }
 
+        function updateRuleLabel() {
+            const member = document.getElementById('ruleMember').value;
+            const label = document.getElementById('ruleTaskLabel');
+            if (member === '') {
+                label.textContent = 'Taak overslaan:';
+            } else {
+                label.textContent = 'Kan niet:';
+            }
+        }
+
         async function addRule() {
             const member = document.getElementById('ruleMember').value;
             const task = document.getElementById('ruleTask').value || null;
@@ -5385,14 +5396,26 @@ async def tasks_pwa():
             const day = dayStr !== '' ? parseInt(dayStr) : null;
             const description = document.getElementById('ruleDescription').value;
             const result = document.getElementById('ruleResult');
-            const ruleType = day === null && task !== null ? 'never' : 'unavailable';
+
+            // Bepaal rule_type op basis van selectie
+            let ruleType;
+            if (member === '') {
+                // Iedereen = skip_day regel
+                ruleType = 'skip_day';
+            } else if (day === null && task !== null) {
+                // Specifiek lid, geen dag = never
+                ruleType = 'never';
+            } else {
+                // Specifiek lid, specifieke dag = unavailable
+                ruleType = 'unavailable';
+            }
 
             try {
                 const res = await fetch(API + '/api/rules', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
-                        member_name: member,
+                        member_name: member || null,
                         task_name: task,
                         day_of_week: day,
                         rule_type: ruleType,
